@@ -1,0 +1,82 @@
+# Binary files
+*.dll
+*.so
+*.lib
+*.def
+*.exe
+*.bin
+
+# Compressed archives
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# Build outputs
+Debug/
+Release/
+Output/
+x64/
+build/
+dist/
+*.spec
+*.obj
+*.o
+*.ko
+
+# IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.pdb
+*.ilk
+*.exp
+
+# Qt build artifacts
+.qmake.stash
+Makefile.Debug
+Makefile.Release
+ui_*.h
+*.qtvscr
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+venv/
+.env
+
+# OS files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Internal tools (not for public release)
+example/hpm_production_tool/
+example/multichannel_logger/
+example/update_firmware_v3/
+example/bmcli/
+
+# Legacy Python packages (moved to separate repos)
+example/python-can-3.3.4/
+example/python-can-4.0.0/
+example/python-udsoncan-1.13.1/
+example/python-lin-1.0.0/
+
+# CICD / firmware artifacts
+version
+update.bin
+
+# Documentation not for public release
+doc/ISO11898/
+doc/ISO15765/
+doc/BUSMASTER.chm

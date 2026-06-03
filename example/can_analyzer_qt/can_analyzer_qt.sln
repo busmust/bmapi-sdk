@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.34931.43
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "can_analyzer_qt", "can_analyzer_qt.vcxproj", "{665608CA-DFBB-3992-B19A-22156E171840}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{665608CA-DFBB-3992-B19A-22156E171840}.Debug|x86.ActiveCfg = Debug|Win32
+		{665608CA-DFBB-3992-B19A-22156E171840}.Debug|x86.Build.0 = Debug|Win32
+		{665608CA-DFBB-3992-B19A-22156E171840}.Release|x86.ActiveCfg = Release|Win32
+		{665608CA-DFBB-3992-B19A-22156E171840}.Release|x86.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {01E62C24-87AB-418C-BEA9-F12ADC6DE4D0}
+	EndGlobalSection
+EndGlobal

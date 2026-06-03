@@ -1,0 +1,40 @@
+1. BM_EnumerateRemote
+2. BM_OpenEx
+3. Config TX tasks to remote device: [refer to cyclic_tx_task example]
+        static const uint16_t dlc2len[16] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64 };
+        memset(&txtask, 0, sizeof(txtask));
+        txtask.type = BM_TXTASK_INCDATA;
+        txtask.cycle = 1000;
+        txtask.nrounds = 0xFFFFU;
+        txtask.nmessages = 1;
+        txtask.pattern.incdata.startbit = 0;
+        txtask.pattern.incdata.nbits = 32;
+        txtask.pattern.incdata.step = 1;
+        txtask.pattern.incdata.min = 0;
+        txtask.pattern.incdata.max = 0xFFFFFFFFU;
+        txtask.pattern.incdata.format = 0x80; /* Intel little edian format */
+        txtask.can.SID = 0x123;
+        txtask.length = (uint8_t)dlc2len[8];
+		txtask.flags = 0;// BM_CAN_MESSAGE_FLAGS_FDF | BM_CAN_MESSAGE_FLAGS_BRS;
+        memset(txtask.payload, 0, sizeof(txtask.payload));
+		if (BM_SetTxTasks(channel, &txtask, 1) != BM_ERROR_OK)
+4. Enable offline logging (*.bbd, *.asc):
+		BM_LoggingConfigTypeDef logging = { 0 };
+		logging.version = 1;
+		logging.mode = BM_STORAGE_ALWAYS_ON;
+        logging.format = BM_STORAGE_ASC_FORMAT;
+        logging.channels = 0xFFFFU;
+        logging.direction = BM_STORAGE_DIRECTION_ALL;
+        logging.path.mode = BM_STORAGE_INDEX_PATH;
+        logging.segmentation.createNewFileOnStart = 1;
+        logging.segmentation.overwriteOldFileOnFull = 1;
+		if (BM_Control(channel, 0xCBU, 0, 0, &logging, sizeof(BM_LoggingConfigTypeDef)) != BM_ERROR_OK)
+
+5. !!!IMPORTANT!!! save config to TF card so that GWR loads it automatically on next boot.
+		if (BM_SaveConfig(channel, 0xFFFFFFFFUL) != BM_ERROR_OK)
+		{
+			printf("Failed to save OFFLINE configuration.\n");
+		}
+
+6. [If desired] Wait for rx messages and tx complete events ( to see if TX tasks are running or not)
+7. Close the app any time you want, configuration will be kept in TF card and the device will start sending automatically even if this app is not running.
