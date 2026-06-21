@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.13.7.40 [2026-06-21]
+
+1. Fixed ISO-TP timeout handling under background CAN/CAN FD traffic, improving software ISO-TP stability during diagnostic communication.
+2. Fixed BMAPI Python binding compatibility for TX task structures and ISO-TP send/receive paths used by python-can and udsoncan.
+
 ## 1.13.6.40 [2025-05-15]
 
 1. Added `BM_RecoverBusOff` API for active Bus-off recovery, avoiding the impact of periodic polling on other channels' transmit periods; added `BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY` mode flag to allow users to disable automatic recovery

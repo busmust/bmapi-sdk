@@ -2,7 +2,7 @@
  * @file        bmapi.h
  * @brief       Busmust device communication API.
  * @author      busmust
- * @version     1.11.0.31
+ * @version     1.13.7.40
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -23,7 +23,7 @@ extern "C" {
  * @brief API version, format: major.minor.revision.build
  * @note  This macro might be checked by the application so that it could adapt to different versions of BMAPI.
  */
-#define BM_API_VERSION         0x010B001f
+#define BM_API_VERSION         0x010D0728
 
  /**
 * @def   BMAPI_REMOTE_API_AVAILABLE
@@ -56,6 +56,13 @@ extern "C" {
  *          most APIs would require a handle to operate on the target device channel.
  */
 typedef void* BM_ChannelHandle;
+
+/**
+ * @typedef BM_DeviceHandle
+ * @brief   Abstract handle to opened Busmust device channel,
+ *          most APIs would require a handle to operate on the target device channel.
+ */
+typedef void* BM_DeviceHandle;
 
 /**
  * @typedef BM_NotificationHandle
@@ -192,13 +199,13 @@ BMAPI BM_StatusTypeDef BM_Reset(BM_ChannelHandle handle);
 
 /**
  * @brief     Reset the device hardware which an opened channel belongs to, in case the device hardware is in unknown error state and is unrecoverable using BM_OpenEx.
- * @param[in] handle  Handle to a opened channel (which belongs to the physical device to reset).
+ * @param[in] handle  Handle to a opened device (which belongs to the physical device to reset).
  * @return    Operation status, see BM_StatusTypeDef for details.
  * @note      !!!CAUTION!!! Note this API will break all active USB/Ethernet connection, just like you have manually unplugged it and then plugged it back.
  *            All opened channel handles that belongs to the physical device under reset will be invalid after reset.
  *            You MUST re-open and re-configure all channels using BM_OpenEx or other configuration APIs after reset.
  */
-BMAPI BM_StatusTypeDef BM_ResetDevice(BM_ChannelHandle handle);
+BMAPI BM_StatusTypeDef BM_ResetDevice(BM_DeviceHandle handle);
 
 /**
  * @brief     Activate an opened channel, and thus goes on bus for the selected port and channels. 
@@ -226,6 +233,15 @@ BMAPI BM_StatusTypeDef BM_Deactivate(BM_ChannelHandle handle);
 BMAPI BM_StatusTypeDef BM_ClearBuffer(BM_ChannelHandle handle);
 
 /**
+ * @brief      Recover from CAN BUSOFF state.
+ *             For firmware V3.x+, sends USB command to reset MCAN controller.
+ *             For older firmware, falls back to loopback + dummy message recovery.
+ * @param[in]  handle  Handle to the channel to recover.
+ * @return    Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_RecoverBusOff(BM_ChannelHandle handle);
+
+/**
  * @brief     Cancel all pending write requests for a given channel, this operation will release internal listener resources in a multi-threading environment.
  * @param[in] handle  Handle to the channel to cancel writing.
  * @return    Operation status, see BM_StatusTypeDef for details.
@@ -240,6 +256,7 @@ BMAPI BM_StatusTypeDef BM_CancelWrite(BM_ChannelHandle handle);
  */
 BMAPI BM_StatusTypeDef BM_GetChannelInfo(BM_ChannelHandle handle, BM_ChannelInfoTypeDef* info);
 
+
 /**
  * @brief      Set PTP timestamp synchronization mode.
  * @param[in]  handle  Handle to the channel to operate on.
@@ -251,18 +268,41 @@ BMAPI BM_StatusTypeDef BM_SetPtpMode(BM_ChannelHandle handle, BM_PtpModeTypeDef 
 /**
  * @brief      Set PTP timestamp in nano-seconds of the given channel.
  * @param[in]  handle  Handle to the channel to operate on.
- * @param[in]  ns      Expected PTP timestamp in nano-seconds, which is usually a UTC timestamp.
+ * @param[in]  ns      Expected PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
  * @return     Operation status, see BM_StatusTypeDef for details.
  */
 BMAPI BM_StatusTypeDef BM_SetPtpTime(BM_ChannelHandle handle, uint64_t ns);
 
 /**
- * @brief      Get timestamp in nano-seconds of the given channel.
+ * @brief      Get PTP timestamp in nano-seconds of the given channel.
  * @param[in]  handle  Handle to the channel to operate on.
- * @param[out] ns      Current PTP timestamp in nano-seconds, which is usually a UTC timestamp.
+ * @param[out] ns      Current PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
  * @return     Operation status, see BM_StatusTypeDef for details.
  */
 BMAPI BM_StatusTypeDef BM_GetPtpTime(BM_ChannelHandle handle, uint64_t* ns);
+
+/**
+ * @brief      Get PTP timestamp in nano-seconds of the host machine, which is calling BMAPI.
+ * @return     Current PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
+ */
+BMAPI uint64_t BM_GetHostPtpTime(void);
+
+/**
+ * @brief     A platform/OS independent implementation to synchronize PTP timestamp with the host machine for single/multiple channels.
+ * @param[in] handles     An array of channel handles.
+ * @param[in] nhandles    Number of valid channel handles.
+ * @return    Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_SyncPtpTimes(BM_ChannelHandle handles[], int nhandles);
+
+/**
+ * @brief      Convert from 32-bit hardware timestamp to 64-bit UTC timestamp.
+ * @param[in]  handle  Handle to the channel to operate on.
+ * @param[in]  timestamp32  Hardware 32-bit timestamp.
+ * @param[out] timestamp64  Converted 64-bit timestamp in micro-second, since 1970-1-1.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_MapTimestamp(BM_ChannelHandle handle, uint32_t timestamp32, uint64_t* timestamp64);
 
 
 /**
@@ -347,24 +387,6 @@ BMAPI BM_StatusTypeDef BM_ReadMultipleCanMessage(BM_ChannelHandle handle, BM_Can
  * @note       Note this function is a simple wrapper of BM_Read(), see BM_Read() for details.
  */
 BMAPI BM_StatusTypeDef BM_ReadLinMessage(BM_ChannelHandle handle, BM_LinMessageTypeDef* msg, uint32_t* channel, uint32_t* timestamp);
-
-/**
- * @brief      read LIN message out of the given channel, with given timeout value.
- *             
- *             As LIN master, this function will write reading-request to LIN slave first, and wait for slave response, until response is received or time out.
- *             So the caller is responsible for constructing the reading-request and fill into 'msg' param, with msg.id=requestd id and msg.ctrl.lin.TRANSMIT=0.
- * 
- *             As LIN slave, this function is identical with BM_WaitForNotifications + BM_ReadLinMessage.
- * 
- * @param[in]    handle     Handle to the channel to read from.
- * @param[inout] msg        A caller-allocated buffer to hold the LIN message output, see BM_LinMessageTypeDef for details.
- * @param[in]    timeout    Timeout waiting for response from LIN slave.
- * @param[out]   channel    The source channel ID from which the message is received, starting from zero, could be NULL if not required.
- * @param[out]   timestamp  The device local high precision timestamp in microseconds, when the message is physically received on the LIN bus, could be NULL if not required.
- * @return     Operation status, see BM_StatusTypeDef for details.
- * @note       Note this function is a simple wrapper of BM_Read(), see BM_Read() for details.
- */
-BMAPI BM_StatusTypeDef BM_ReadLinMessageEx(BM_ChannelHandle handle, BM_LinMessageTypeDef* msg, uint32_t* _channel, int timeout, uint32_t* timestamp);
 
 /**
  * @brief      Write any message/event to the given channel.
@@ -468,6 +490,26 @@ BMAPI BM_StatusTypeDef BM_Control(BM_ChannelHandle handle, uint8_t command, uint
  * @return     Current status code, see BM_StatusTypeDef for details.
  */
 BMAPI BM_StatusTypeDef BM_GetStatus(BM_ChannelHandle handle, BM_StatusInfoHandle statusinfo);
+
+/**
+ * @brief      Get current channel status of the given channel.
+ * @param[in]  handle      Handle to the channel to operate on.
+ * @param[out] handle      Handle to the device to operate on.
+ * @param[out] statusinfo  Detailed information of current channel status, see BM_CanStatusInfoTypedef/BM_LinStatusInfoTypeDef for details.
+ * @return     Current status code, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_GetDevice(BM_ChannelHandle channel, BM_DeviceHandle* device);
+
+/**
+ * @brief      Set device internal buffer target when calling BM_Read and BM_Write to tranfer messages.
+ *             For example, you might want to this API to switch to the device's internal REPLAYQ buffer for hardware replay purpose.
+ * @param[in]  handle      Handle to the device to operate on.
+ * @param[out] type        Current can buffer read and write, see BM_BufferTypeDef for details.
+ * @param[out] bufferid    Current can buffer cache area, see BM_BufferId for details.
+
+ * @return     Current status code, see BM_StatusTypeDef for details.
+*/
+BMAPI BM_StatusTypeDef BM_SetBuffer(BM_DeviceHandle device, BM_BufferTypeDef type, BM_BufferId id);
 
 /**
  * @brief      Get current CAN status of the given channel.
@@ -703,6 +745,66 @@ BMAPI BM_StatusTypeDef BM_GetNotification(BM_ChannelHandle handle, BM_Notificati
 BMAPI int BM_WaitForNotifications(BM_NotificationHandle handles[], int nhandles, int ntimeoutms);
 
 /**
+ * @brief      Set offline logging configuration for current channel.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  logging   Logging configuration, see BM_LoggingConfigTypeDef for details.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       All channels of a physical device share the same logging configuration, that is, you simply need to select any channel (e.g. CH0) and configure logging once.
+ */
+BMAPI BM_StatusTypeDef BM_SetLogging(BM_ChannelHandle handle, BM_LoggingConfigTypeDef* logging);
+
+/**
+ * @brief      Get offline logging configuration for current channel.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  logging   Logging configuration, see BM_LoggingConfigTypeDef for details.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       All channels of a physical device share the same logging configuration, that is, you simply need to select any channel (e.g. CH0) and configure logging once.
+ */
+BMAPI BM_StatusTypeDef BM_GetLogging(BM_ChannelHandle handle, BM_LoggingConfigTypeDef* logging);
+
+/**
+ * @brief      Set offline replay configuration for current channel.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  replay    Replay configuration, see BM_ReplayConfigTypeDef for details.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       All channels of a physical device share the same replay configuration, that is, you simply need to select any channel (e.g. CH0) and configure replay once.
+ */
+BMAPI BM_StatusTypeDef BM_SetReplay(BM_ChannelHandle handle, BM_ReplayConfigTypeDef* replay);
+
+/**
+ * @brief      Set offline replay configuration for current channel.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  replay    Replay configuration, see BM_ReplayConfigTypeDef for details.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       All channels of a physical device share the same replay configuration, that is, you simply need to select any channel (e.g. CH0) and configure replay once.
+ */
+BMAPI BM_StatusTypeDef BM_GetReplay(BM_ChannelHandle handle, BM_ReplayConfigTypeDef* replay);
+
+/**
+ * @brief      Load configuration from off-line storage media for the given channels.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  configmask   BM_TableTypeTypeDef bit-mask, each bit indicates a config item, e.g. bit0=BM_CAN_MODE, bit2=BM_CAN_BITRATE.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_LoadConfig(BM_ChannelHandle handle, uint32_t configmask);
+
+/**
+ * @brief      Save configuration to off-line storage media for the given channels.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  configmask   BM_TableTypeTypeDef bit-mask, each bit indicates a config item, e.g. bit0=BM_CAN_MODE, bit2=BM_CAN_BITRATE.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_SaveConfig(BM_ChannelHandle handle, uint32_t configmask);
+
+/**
+ * @brief      Clear configuration in off-line storage media for the given channels.
+ * @param[in]  handle    Handle to the channel to operate on.
+ * @param[in]  configmask   BM_TableTypeTypeDef bit-mask, each bit indicates a config item, e.g. bit0=BM_CAN_MODE, bit2=BM_CAN_BITRATE.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ */
+BMAPI BM_StatusTypeDef BM_ClearConfig(BM_ChannelHandle handle, uint32_t configmask);
+
+/**
  * @brief      Translate error code to string, this is a helper function to ease application programming.
  * @param[in]  errorcode  The errorcode to be translated.
  * @param[out] buffer     A caller-allocated string buffer to hold the translated string.
@@ -710,6 +812,15 @@ BMAPI int BM_WaitForNotifications(BM_NotificationHandle handles[], int nhandles,
  * @param[in]  language   Reserved, only English is supported currently.
  */
 BMAPI void BM_GetErrorText(BM_StatusTypeDef errorcode, char* buffer, int nbytes, uint16_t language);
+
+/**
+ * @brief      Extract PTP timestamp from data (i.e. CAN message), this is a helper function to ease application programming.
+ * @param[in]  handle     Handle to the channel to operate on. Could be NULL if the device supports hardware PTP.
+ *                        Otherwise you would need this handle to align device local timestamp with host machine's UTC time.
+ * @param[in]  data       The message data from which to extract an PTP timestamp.
+ * @param[out] timestamp  The extracted PTP timestamp, in nanoseconds.
+ */
+BMAPI BM_StatusTypeDef BM_GetDataPtpTimestamp(BM_ChannelHandle channel, BM_DataTypeDef* data, uint64_t* timestamp);
 
 /**
  * @brief      Translate data (i.e. CAN message) to string, this is a helper function to ease application programming.
@@ -733,6 +844,12 @@ BMAPI BM_LogLevelTypeDef BM_GetLogLevel(void);
 BMAPI void BM_SetLogLevel(BM_LogLevelTypeDef level);
 
 /**
+ * @brief      Set background thread priority for performance-tuning purpose.
+ * @param[in]  priority       A integer, which is, 0-15 on Windows, and 0-100 on Unix.
+ */
+BMAPI void BM_SetThreadPriority(uint32_t priority);
+
+/**
  * @brief      Get library (*.dll|*.so) BMAPI version.
  * @return     32-bit version code:
  *             bit31-28 = major
@@ -743,27 +860,7 @@ BMAPI void BM_SetLogLevel(BM_LogLevelTypeDef level);
  *             in case that *.h is mismatch with *.dll|*.so, use the macro BM_API_VERSION defined in bmapi.h to check consistency.
  */
 BMAPI uint32_t BM_GetVersion(void);
-/**
- * @brief      Load Config option of the given channel.
- * @param[in]  handle    Handle to the channel to operate on.
- * @param[in]  configmask   Device configuration mask£¬ see BM_TableTypeTypeDef for details.
- * @return     Operation status, see BM_StatusTypeDef for details.
- */
-BMAPI BM_StatusTypeDef BM_LoadConfig(BM_ChannelHandle handle, int configmask);
-/**
- * @brief      Save Config option of the given channel.
- * @param[in]  handle    Handle to the channel to operate on.
- * @param[in]  configmask   Device configuration mask£¬ see BM_TableTypeTypeDef for details.
- * @return     Operation status, see BM_StatusTypeDef for details.
- */
-BMAPI BM_StatusTypeDef BM_SaveConfig(BM_ChannelHandle handle, int configmask);
-/**
- * @brief      Clear Config option of the given channel.
- * @param[in]  handle    Handle to the channel to operate on.
- * @param[in]  configmask   Device configuration mask£¬ see BM_TableTypeTypeDef for details.
- * @return     Operation status, see BM_StatusTypeDef for details.
- */
-BMAPI BM_StatusTypeDef BM_ClearConfig(BM_ChannelHandle handle, int configmask);
+
 
 
 #ifdef __cplusplus

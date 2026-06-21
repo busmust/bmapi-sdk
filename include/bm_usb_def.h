@@ -1,8 +1,8 @@
-/**
+﻿/**
  * @file        bm_usb_def.h
  * @brief       Busmust USB device data type definitions.
  * @author      busmust
- * @version     1.11.0.31
+ * @version     1.13.7.40
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -21,17 +21,19 @@ extern "C" {
  */
 #define BM_DATA_HEADER_SIZE (8U)
 
+#define BM_DATA_TAIL_SIZE (16U)
+
 /**
  * @def   BM_DATA_PAYLOAD_MAX_SIZE
  * @brief Size (in bytes) of BM Data payload, which contains a concrete message in CANFD|LIN|FLEXRAY|... type.
  */
-#define BM_DATA_PAYLOAD_MAX_SIZE (72U)
+#define BM_DATA_PAYLOAD_MAX_SIZE (72U + BM_DATA_TAIL_SIZE)
 
 /**
  * @def   BM_JUMBO_DATA_PAYLOAD_MAX_SIZE
  * @brief Size (in bytes) of BM Jumbo Data payload, which contains a concrete message in ETH|CANTP|MODBUS... type.
  */
-#define BM_JUMBO_DATA_PAYLOAD_MAX_SIZE (9*1024U)
+#define BM_JUMBO_DATA_PAYLOAD_MAX_SIZE (9*1024U + BM_DATA_TAIL_SIZE)
 
 /**
  * @def   BM_DATA_PAYLOAD_MAX_VALID_LENGTH
@@ -50,6 +52,20 @@ extern "C" {
  * @brief Size (in bytes) of BM Jumbo Data, which contains a header and payload.
  */
 #define BM_JUMBO_DATA_MAX_SIZE (BM_DATA_HEADER_SIZE + BM_JUMBO_DATA_PAYLOAD_MAX_SIZE)
+
+/**
+* @def   BM_REMOTE_IO_UDP_SOCKET_PORT
+* @brief Remote IO UDP socket port.
+* @note  This is a simple READONLY indicator for customers, DO NOT try to change this macro without re-compiling the BMAPI library.
+*/
+#define BM_REMOTE_IO_UDP_SOCKET_PORT 2502
+
+/**
+* @def   BM_REMOTE_CTRL_UDP_SOCKET_PORT
+* @brief Remote CTRL UDP socket port.
+* @note  This is a simple READONLY indicator for customers, DO NOT try to change this macro without re-compiling the BMAPI library.
+*/
+#define BM_REMOTE_CTRL_UDP_SOCKET_PORT 3502
 
 /**
  * @enum  BM_LogLevelTypeDef
@@ -77,6 +93,10 @@ typedef enum
     BM_FLEXRAY_CAP = 0x0008U,   /**< The device is capable of handling FLEXRAY messages */
     BM_MODBUS_CAP = 0x0010U,    /**< The device is capable of handling MODBUS messages */
     BM_ETHERNET_CAP = 0x0020U,  /**< The device is capable of handling ETHERNET messages */
+    BM_AIO_CAP = 0x0100U,       /**< The device is capable of analog IO */
+    BM_DIO_CAP = 0x0200U,       /**< The device is capable of digital IO */
+    BM_VIRTUAL_CAP = 0x4000U,  /**< The device is virtual, for simulation purpose */
+    BM_REMOTE_CAP = 0x8000U,    /**< The device is connected remotely and is capable of remote management */
     BM_ALL_CAP = 0xFFFFU        /**< Typically used for masking the CAP fields when programming */
 } BM_CapabilityTypeDef;
 
@@ -134,6 +154,24 @@ typedef enum
     BM_ERROR_ILLOPERATION = 0x8000000           /**< Invalid operation */
 } BM_StatusTypeDef;
 
+typedef enum
+{
+    BM_DEFAULT_BUFFER = 0x0000,                 /**< Default buffer: txq for write, rxq for read */
+    BM_LOGGINGFILE_BUFFER = 0x0001,             /**< Buffer for logging file operations */
+    BM_REPLAYFILE_BUFFER = 0x0002,              /**< Buffer for replay file operations */
+    BM_LOGGINGQ_BUFFER = 0x0111,                /**< Buffer for logging queue */
+    BM_REPLAYQ_BUFFER = 0x0222,                 /**< Buffer for replay queue */
+    BM_RXQ_BUFFER = 0x1111,                     /**< RX queue buffer (compatible with BM_ClearBuffer) */
+    BM_TXQ_BUFFER = 0x2222,                     /**< TX queue buffer (compatible with BM_ClearBuffer) */
+    BM_NO_BUFFER = 0xFFFF                       /**< No buffer: direct physical channel access for low latency */
+} BM_BufferId;
+
+typedef enum
+{
+    BM_WRITE_BUFFER = 0,                        /**< Write buffer*/
+    BM_READ_BUFFER = 0x8000U                    /**< Read buffer*/
+} BM_BufferTypeDef;
+
 /**
  * @enum  BM_CanModeTypeDef
  * @brief CAN mode IDs, used by BM_SetCanMode() to change the operation mode of CAN device.
@@ -152,6 +190,7 @@ typedef enum
     BM_CAN_NON_ISO_MODE = 0x08,                 /**< OR-Bitmask: The device is running with the capability to handle CAN and NON-ISO(Bosch) CANFD messages */
     BM_CAN_NON_AUTORETX_MODE = 0x10,            /**< OR-Bitmask: The device will not try to re-transmit failed messages if this bitmask is set */
     BM_CAN_NOACK_MODE = 0x20,                   /**< OR-Bitmask: ACK from remote ECU is not checked, always try to send message */
+    BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY = 0x40, /**< OR-Bitmask: Disable automatic bus-off recovery, only manual BM_BUSOFF_RECOVERY command triggers recovery */
 } BM_CanModeTypeDef;
 
 /**
@@ -336,6 +375,18 @@ typedef enum
     BM_STAT_RX_ERROR,                   /**< Number of RX errors */
     BM_STAT_TOTAL_STORAGE_SIZE_KB,      /**< Offline storage total size (kB) */
     BM_STAT_FREE_STORAGE_SIZE_KB,       /**< Offline storage free size (kB) */
+    BM_STAT_TXQ_BYTE,                   /**< Current used size of TXQ, in bytes */
+    BM_STAT_RXQ_BYTE,                   /**< Current used size of RXQ, in bytes */
+    BM_STAT_REPLAYQ_BYTE,               /**< Current used size of REPLAYQ, in bytes */
+    BM_STAT_LOGGINGQ_BYTE,              /**< Current used size of LOGGINGQ, in bytes */
+    BM_STAT_REPLAYFILE_BYTE,            /**< Current size of replay file, in bytes */
+    BM_STAT_LOGGINGFILE_BYTE,           /**< Current size of logging file, in bytes */
+    BM_STAT_TXQ_MAXSIZE_BYTE,           /**< Max acceptable size of TXQ, in bytes */
+    BM_STAT_RXQ_MAXSIZE_BYTE,           /**< Max acceptable size of RXQ, in bytes */
+    BM_STAT_REPLAYQ_MAXSIZE_BYTE,       /**< Max acceptable size of REPLAYQ, in bytes */
+    BM_STAT_LOGGINGQ_MAXSIZE_BYTE,      /**< Max acceptable size of LOGGINGQ, in bytes */
+    BM_STAT_REPLAYFILE_MAXSIZE_BYTE,    /**< Max acceptable size of replay file, in bytes */
+    BM_STAT_LOGGINGFILE_MAXSIZE_BYTE,   /**< Max acceptable size of logging file, in bytes */
     BM_STAT_CAP = 0x40U,
     BM_STAT_MAX_RXFILTER,               /**< Max allowed RX filter count */
     BM_STAT_MAX_TXTASK,                 /**< Max allowed TX Task count */
@@ -347,6 +398,8 @@ typedef enum
     BM_STAT_SUPPORT_ROUTE,              /**< This device supports message route */
     BM_STAT_SUPPORT_LOGGING,            /**< This device supports logging CAN traffic into offline storage */
     BM_STAT_SUPPORT_REPLAY,             /**< This device supports replaying CAN traffic from offline storage */
+    BM_SUPPORT_BUFFER_API,
+    BM_SUPPORT_FATFS_API,
 } BM_StatTypeDef;
 
 /**
@@ -430,8 +483,10 @@ typedef enum
 {
     BM_STORAGE_DEFAULT_FORMAT = 0,
     BM_STORAGE_BBD_FORMAT = BM_STORAGE_DEFAULT_FORMAT,
-    BM_STORAGE_LOG_FORMAT,
-    BM_STORAGE_ASC_FORMAT,
+    BM_STORAGE_PCAP_FORMAT = 1,
+    BM_STORAGE_LOG_FORMAT = 2,
+    BM_STORAGE_ASC_FORMAT = 3,
+    BM_STORAGE_BLF_FORMAT = 4,
 } BM_StorageFormatTypeDef;
 
 /**
@@ -472,16 +527,36 @@ typedef enum
 typedef struct
 {
     uint16_t type : 4;                  /**< Data type, see BM_DataTypeTypeDef for details. */
-    uint16_t flags : 4;                 /**< Reserved flags, keep 0 */
+    uint16_t flags : 1;                 /**< If this packet has an additional tail or not, packet.length = payload.length + tail.length if flags=1. */
+    uint16_t group : 3;                 /**< Channel group index, starting from zero, each group contains 16 channels */
+                                        /**< e.g.Use[group = 0, schn = 7] to access the 7th port(in BM_ChannelInfoTypeDef) of a device */
+                                        /**< e.g.Use[group = 2, schn = 3] to access the 35th port(in BM_ChannelInfoTypeDef) of a device */
     uint16_t dchn : 4;                  /**< Destination channel ID, starting from zero, used by TX data to indicate the hardware about the target port. */
     uint16_t schn : 4;                  /**< Source channel ID, starting from zero, used by RX data to indicate the application about the source port. */
 } BM_DataHeaderTypeDef;
 
 /**
+ * @typedef BM_DataTailTypeDef
+ * @brief   Busmust data tail, each BM_DataTypeDef contains an optional (if header.hastail) tail which indicates packet side-band information, i.e. 64-bit UTC timestamp.
+ */
+typedef struct
+{
+    uint8_t type;                  /**< Tail type, reserved for future, default as zero. */
+    uint8_t reserved[3];
+    uint16_t packetid;             /**< Packet id, this is usually a sequential counter which can be used to detect packet loss */
+    uint16_t checksum;             /**< Checksum of the whole packet, including header and tail, 0 if invalid or disabled. */
+    uint32_t utctsl;               /**< Low part of 64-bit UTC high precision timestamp in microseconds, since 1970-1-1. */
+    uint32_t utctsh;               /**< High part of 64-bit UTC high precision timestamp in microseconds, since 1970-1-1. */
+} BM_DataTailTypeDef;
+
+/**
  * @def   BM_DATA_HEADER
  * @brief Helper macro to define a BM data header value
  */
-#define BM_DATA_HEADER(type, flags, dchn, schn) (((type) & 0x0FU) | (((flags) << 4U) & 0xF0U) | (((dchn) << 8U) & 0x0F00U) | (((schn) << 12U) & 0xF000U))
+#define BM_DATA_HEADER(type, flags, dchn, schn) (((type) & 0x0FU) | (((flags) << 4U) & 0x10U) | (((dchn) << 8U) & 0x0F00U) | (((schn) << 12U) & 0xF000U))
+#define BM_DATA_HEADER_EX(type, flags, dchn, schn, group) (((type) & 0x0FU) | (((flags) << 4U) & 0x10U) | (((dchn) << 8U) & 0x0F00U) | (((schn) << 12U) & 0xF000U) | (((group) << 5U) & 0xE0U))
+#define BM_DATA_SCHN(header) (((uint16_t)((header).group)) * 16U + ((uint16_t)((header).schn)))
+#define BM_DATA_DCHN(header) (((uint16_t)((header).group)) * 16U + ((uint16_t)((header).dchn)))
 
 /**
  * @typedef BM_DataTypeDef
@@ -490,9 +565,9 @@ typedef struct
 typedef struct
 {
     BM_DataHeaderTypeDef header;                /**< data header, see BM_DataHeaderTypeDef for details. */
-    uint16_t length;                            /**< length in bytes of the payload only (header excluded). */
+    uint16_t length;                            /**< length in bytes of the payload byte array (header excluded) */
     uint32_t timestamp;                         /**< 32-bit device local high precision timestamp in microseconds. */
-    uint8_t payload[BM_DATA_PAYLOAD_MAX_SIZE];  /**< buffer holding concrete message payload (i.e. a CAN message in BM_CanMessageTypeDef format). */
+    uint8_t payload[BM_DATA_PAYLOAD_MAX_SIZE];  /**< buffer holding concrete message payload (i.e. a CAN message in BM_CanMessageTypeDef format), followed by an optional tail. */
 } BM_DataTypeDef;
 
 /**
@@ -502,6 +577,7 @@ typedef struct
 #define BM_INIT_CAN_FD_DATA(_data, _id, _dlc, _ide, _fdf, _brs, _rtr, _esi, _payload) { \
     BM_CanMessageTypeDef* can = (BM_CanMessageTypeDef*)(_data).payload; \
     (_data).header.type = BM_CAN_FD_DATA; \
+    (_data).header.group = 0x7U; \
     (_data).header.schn = 0xFU; \
     (_data).header.dchn = 0xFU; \
     (_data).header.flags = 0x0U; \
@@ -581,8 +657,9 @@ typedef struct {
     uint32_t BRS : 1;                           /**< This message requires CAN-FD bitrate switching */
     uint32_t FDF : 1;                           /**< This message is a CAN-FD CAN message */
     uint32_t ESI : 1;                           /**< Reserved for gateways */
-    uint32_t SEQ : 8;                          /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ */
-    uint32_t unimplemented1 : 15;               /**< Reserved */
+    uint32_t SEQ : 8;                           /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ */
+    uint32_t ECHO : 1;                      /**< Tag for whether tx echoes when timeout is not 0 */
+    uint32_t unimplemented1 : 14;               /**< Reserved */
 } BM_TxMessageCtrlTypeDef;
 
 /**
@@ -658,8 +735,8 @@ typedef struct {
     uint32_t SLEEP : 1;                         /**< This is a sleep event */
     uint32_t ENHANCED_CHECKSUM : 1;             /**< Flag for enhanced checksum */
     uint32_t USER_CHECKSUM : 1;                 /**< Flag for user defined checksum, use value from 'CHECKSUM' field if USER_CHECKSUM==1  */
-    uint32_t SEQ : 7;                           /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ */
-    uint32_t ISTXTASK : 1;                      /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ */
+    uint32_t SEQ : 7;                           /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ or TXTASK index */
+    uint32_t ISTXTASK : 1;                      /**< A indicator for TXTASK TEF event, SEQ=TXTASK index if ISTXTASK=1 */
     uint32_t ERRORS : 6;                        /**< Error code, which is a bitmask, see BM_LinErrorTypeDef for details. */
     uint32_t ID_PARITY : 1;                     /**< Parity bit */
     uint32_t CHECKSUM : 8;                      /**< Checksum value */
@@ -719,7 +796,7 @@ typedef struct
     uint16_t pid;                               /**< Device PID */
     uint16_t port;                              /**< Port ID (0-7) of the device, note a multi-port device is enumerated as multiple dedicated BM_ChannelInfoTypeDef entries */
     uint16_t cap;                               /**< Device Capability flags, see BM_CapabilityTypeDef for details. */
-    uint8_t  reserved[4];                       /**< Reserved */
+    uint8_t  addr[4];                           /**< Device address, this is usually a IPV4 address and can be converted to in_addr struct pointer (address in network byte order) */
 } BM_ChannelInfoTypeDef;
 
 /**
@@ -823,10 +900,16 @@ typedef struct
         uint8_t unused;                         /**< For backward-compatibility only */
     };
     uint8_t  flags;                             /**< CAN message control Flags, see BM_MessageFlagsTypeDef for details. */
-    uint8_t  length;                            /**< Length of payload in bytes (not DLC) */
-    uint8_t  length_msb;                        /**< MSB of length field, for future compatibility, please set length_msb=0 when transmitting CAN or LIN messages */
-    uint8_t  reserved[1];                       /**< Reserved */
-
+    struct
+    {
+        uint8_t length : 7;                     /**< Length of payload in unit given by 'lengthunit' (not DLC) */
+        uint8_t lengthunit : 1;                 /**< Unit of length, 0=1B, 1=128B, default as 0, that is, length in bytes */
+                                                /**< Note that not payload buffer might not be 100% used,
+                                                     user would need to check specific data header in payload for further information,
+                                                     i.e. ((BM_CanfdDataTypeDef*)txtask.payload)->ctrl.tx.DLC */
+    };
+    uint16_t delay;                             /**< Delay within tx cycle, that is, offset of tx timing slot within tx cycle (given by 'cycle' field)*/
+                                                /**< i.e. If cycle=50 and delay=10, this txtask will be executed at 10, 60, 110, 160, etc. */
     uint16_t cycle;                             /**< ms delay between rounds */
     uint16_t nrounds;                           /**< num of cycles, nrounds=0xFFFFU indicates INFINITE */
     uint16_t nmessages;                         /**< messages per round, default as 1 message/cycle */
@@ -896,14 +979,14 @@ typedef struct
 
 typedef struct
 {
-        uint8_t type;           /**< 0 = invalid, 1 = unicast, 2 = broadcast                                                  */
-        uint8_t source;         /**< Source channel index (0-15)                                                              */
-        uint16_t target;        /**< Target channel: index if type==1, bitmask of target channels if type==2                  */
+	uint8_t type;           /**< 0 = invalid, 1 = unicast, 2 = broadcast                                                  */
+	uint8_t source;         /**< Source channel index (0-15)                                                              */
+	uint16_t target;        /**< Target channel: index if type==1, bitmask of target channels if type==2                  */
     uint16_t reserved;      /**< Reserved for future                                                                      */
     uint8_t flagsmask;      /**< Source message flag mask, message will be routed if msg.flags & flagsmask == flagsvalue  */
-        uint8_t flagsvalue;     /**< Source message flag value, See BM_MessageFlagsTypeDef for details                        */
+	uint8_t flagsvalue;     /**< Source message flag value, See BM_MessageFlagsTypeDef for details                        */
     uint32_t idmask;        /**< Source message ID mask, message will be routed if msg.id & idmask == idvalue             */
-        uint32_t idvalue;       /**< Source message ID value, See BM_MessageIdTypeDef for details                             */
+	uint32_t idvalue;       /**< Source message ID value, See BM_MessageIdTypeDef for details                             */
 } BM_MessageRouteTypeDef;
 
 /**
@@ -955,19 +1038,19 @@ typedef struct
     {
         uint8_t stmin;                          /**< STmin raw value (0x00-0x7F or 0xF1-0xF9) if Busmust device is acting as UDS server. Set as 0 if can card is acting as UDS client(normal case). */
         uint8_t blockSize;                      /**< Blocksize if can card is acting as UDS server, 0 means no further FC is needed. Set as 0 if can card is acting as UDS client(normal case). */
-        uint8_t fcFrameLength;                  /**< Flow control frame length in bytes                                                       */
-        uint8_t reserved;
+        uint8_t fcFrameLength;                  /**< Flow control frame length in bytes                                                                                  */
+        uint8_t hardwareIsotpDisabled;          /**< Disable BM_WriteIsotp to use 3rd generation's Hardware ISOTP support. CAUTION!!! 0=ENABLED (by default), 1=DISABLED */
     } flowcontrol;
-    uint8_t extendedAddress;                    /**< UDS Address in Extended Addressing mode                                                  */
-    uint8_t paddingEnabled;                     /**< Enable padding for unused payload bytes/                                                 */
-    uint8_t paddingValue;                       /**< Padding byte value (i.e. 0xCC) for unused payload bytes                                  */
-    uint8_t longPduEnabled;                     /**< Enable long PDU (>4095), note if CAN message DLC>8, long PDU is enabled by default       */
-    uint8_t functionalAddressingEnabled;        /**< Enable BM_ReadIsotp() to handle functional addressing UDS requests, currently only 0x7DF is supported */
+    uint8_t extendedAddress;                    /**< UDS Address in Extended Addressing mode                                                                             */
+    uint8_t paddingEnabled;                     /**< Enable padding for unused payload bytes/                                                                            */
+    uint8_t paddingValue;                       /**< Padding byte value (i.e. 0xCC) for unused payload bytes                                                             */
+    uint8_t longPduEnabled;                     /**< Enable long PDU (only if CAN message DLC>8 and (CAN_DL>8 or FF_DL>4095)), otherwise BM_WriteIsotp returns an error on long write request */
+    uint8_t functionalAddressingEnabled;        /**< Enable BM_ReadIsotp() to handle functional addressing UDS requests, currently only 0x7DF is supported               */
     uint8_t padding[1];
-    BM_IsotpCallbackHandle callbackFunc;        /**< Callback function when any progress is made, used typically by GUI to show progress bar  */
-    uintptr_t callbackUserarg;                  /**< Callback userarg when any progress is made, used typically by GUI to show progress bar   */
+    BM_IsotpCallbackHandle callbackFunc;        /**< Callback function when any progress is made, used typically by GUI to show progress bar                             */
+    uintptr_t callbackUserarg;                  /**< Callback userarg when any progress is made, used typically by GUI to show progress bar                              */
     BM_DataTypeDef testerDataTemplate;          /**< All tester messages will be formatted/checked using this template, configure CAN message ID and IDE/FDF flags here  */
-    BM_DataTypeDef ecuDataTemplate;             /**< All ECU messages will be formatted/checked using this template, configure CAN message ID and IDE/FDF flags here */
+    BM_DataTypeDef ecuDataTemplate;             /**< All ECU messages will be formatted/checked using this template, configure CAN message ID and IDE/FDF flags here     */
 } BM_IsotpConfigTypeDef;
 
 /**
@@ -995,7 +1078,7 @@ typedef struct
         uint8_t stmin;                          /**< STmin raw value (0x00-0x7F or 0xF1-0xF9) if Busmust device is acting as UDS server. Set as 0 if can card is acting as UDS client(normal case). */
         uint8_t blockSize;                      /**< Blocksize if can card is acting as UDS server, 0 means no further FC is needed. Set as 0 if can card is acting as UDS client(normal case). */
         uint8_t fcFrameLength;                  /**< Flow control frame length in bytes                                                       */
-        uint8_t reserved;
+        uint8_t hardwareIsotpDisabled;          /**< Disable BM_WriteIsotp to use 3rd generation's Hardware ISOTP support. CAUTION!!! 0=ENABLED (by default), 1=DISABLED */
     } flowcontrol;
     uint8_t extendedAddress;                    /**< UDS Address in Extended Addressing mode                                                  */
     uint8_t paddingEnabled;                     /**< Enable padding for unused payload bytes/                                                 */
@@ -1055,14 +1138,14 @@ typedef struct
 } BM_EventTriggerTypeDef;
 
 /**
- * @typedef BM_RecordingConfigTypeDef
- * @brief   Recording configuration, used by BM_ConfigRecording().
+ * @typedef BM_LoggingConfigTypeDef
+ * @brief   Logging configuration, used by BM_ConfigLogging().
  */
 typedef struct
 {
     uint8_t version;                            /**< Currently must be set to 0x01                                                            */
     uint8_t mode;                               /**< Logging mode, see BM_StorageModeTypeDef for details                                      */
-    uint8_t format;                             /**< Log file format: 0=BBD, currently only 0 is supported (Use busMaster offline converters) */
+    uint8_t format;                             /**< Log file format: See BM_StorageFormatTypeDef for details.                                */
     uint8_t reserved;
     uint16_t channels;                          /**< A bitmask of TX channels, only channels with '1' are allowed as logging source channel   */
     uint8_t direction;                          /**< Logging direction, see BM_StorageDirectionTypeDef for details                            */
@@ -1091,7 +1174,7 @@ typedef struct
 {
     uint8_t version;                            /**< Currently must be set to 0x01                                                          */
     uint8_t mode;                               /**< Replay mode, see BM_StorageModeTypeDef for details                                     */
-    uint8_t format;                             /**< Log file format: 0=BBD, currently only 0 is supported (Use busMaster offline converters) */
+    uint8_t format;                             /**< Log file format: See BM_StorageFormatTypeDef for details.                              */
     uint8_t reserved;
     uint16_t channels;                          /**< A bitmask of TX channels, only channels with '1' are allowed as replay TARGET channel  */
     uint8_t direction;                          /**< Replay direction, see BM_StorageDirectionTypeDef for details                           */

@@ -1,5 +1,10 @@
 # 更新日志
 
+## 1.13.7.40 [2026-06-21]
+
+1. 修复背景 CAN/CAN FD 流量下 ISO-TP 超时处理问题，提升诊断通信中软件 ISO-TP 的稳定性。
+2. 修复 BMAPI Python 绑定中 TX task 结构体以及 python-can、udsoncan 使用的 ISO-TP 收发路径兼容性问题。
+
 ## 1.13.6.40 [2025-05-15]
 
 1. 新增 `BM_RecoverBusOff` 接口，主动恢复 Bus-off 状态，避免周期性轮询对其他通道发送周期的影响；增加 `BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY` 模式标志，允许用户禁用自动恢复
