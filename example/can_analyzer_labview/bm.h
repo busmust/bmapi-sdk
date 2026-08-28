@@ -485,6 +485,24 @@ typedef struct
     uint8_t  dbtr1;                             /**< Data BTR1 register value, note this value is calculated using clockfreq, which might not be 16MHz */
 } BM_BitrateTypeDef;
 
+typedef enum
+{
+    BM_AUTOSET_PASSIVE_LISTEN = 0,
+    BM_AUTOSET_ACTIVE_DETECT = 1,
+} BM_AutosetModeTypeDef;
+
+typedef struct
+{
+    uint8_t version;
+    uint8_t mode;
+    uint8_t minLockMessages;
+    uint8_t reserved0;
+    uint16_t passiveObservationMs;
+    uint16_t activeWriteTimeoutMs;
+    BM_CanMessageTypeDef probeMessage;
+    uint32_t reserved[4];
+} BM_AutosetConfigTypeDef;
+
 /**
  * @typedef BM_RxFilterTypeDef
  * @brief   CAN channel RX filter item structure, used by BM_SetRxFilter().
@@ -617,8 +635,9 @@ typedef void* BM_NotificationHandle;
  * @param[in] tres         The terminal resistor option value which has passed or failed.
  * @param[in] nrxmessages  Number of received messages while listening to the bus using bitrate and tres.
  * @param[in] userarg      Arbitrary user argument passed by BM_Autoset().
+ * @return  Return 0 to continue AUTOSET sequence, return non-zero value to cancel AUTOSET sequence.
  */
-typedef void (*BM_AutosetCallbackHandle)(const BM_BitrateTypeDef* bitrate, BM_TerminalResistorTypeDef tres, int nrxmessages, uintptr_t userarg);
+typedef uint32_t (*BM_AutosetCallbackHandle)(const BM_BitrateTypeDef* bitrate, BM_TerminalResistorTypeDef tres, int nrxmessages, uintptr_t userarg);
 
 /**
  * @brief  Initialize BMAPI library, this function shall be called before any other API calls and shall only be called once.
@@ -653,6 +672,15 @@ BMAPI BM_StatusTypeDef BM_Autoset(
     BM_ChannelInfoTypeDef* channelinfo,
     BM_BitrateTypeDef* bitrate,
     BM_TerminalResistorTypeDef* tres,
+    BM_AutosetCallbackHandle callback,
+    uintptr_t userarg
+);
+
+BMAPI BM_StatusTypeDef BM_AutosetEx(
+    BM_ChannelInfoTypeDef* channelinfo,
+    BM_BitrateTypeDef* bitrate,
+    BM_TerminalResistorTypeDef* tres,
+    const BM_AutosetConfigTypeDef* config,
     BM_AutosetCallbackHandle callback,
     uintptr_t userarg
 );

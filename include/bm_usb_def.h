@@ -1,8 +1,8 @@
-﻿/**
+/**
  * @file        bm_usb_def.h
  * @brief       Busmust USB device data type definitions.
  * @author      busmust
- * @version     1.13.7.40
+ * @version     1.14.2.43
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -66,6 +66,93 @@ extern "C" {
 * @note  This is a simple READONLY indicator for customers, DO NOT try to change this macro without re-compiling the BMAPI library.
 */
 #define BM_REMOTE_CTRL_UDP_SOCKET_PORT 3502
+
+/** Remote control-session public ABI version. */
+#define BM_REMOTE_SESSION_ABI_VERSION 1U
+
+/** Default remote control-lock lease in milliseconds. */
+#define BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS 10000U
+
+/** Default remote control-session heartbeat interval in milliseconds. */
+#define BM_REMOTE_SESSION_DEFAULT_HEARTBEAT_MS 2000U
+
+/** Minimum supported remote control-lock lease in milliseconds. */
+#define BM_REMOTE_SESSION_MIN_TIMEOUT_MS 3000U
+
+/** Maximum supported remote control-lock lease in milliseconds. */
+#define BM_REMOTE_SESSION_MAX_TIMEOUT_MS 60000U
+
+/** Owner category reported for a remote control session. */
+typedef enum
+{
+    BM_REMOTE_OWNER_NONE = 0,
+    BM_REMOTE_OWNER_LOCAL = 1,
+    BM_REMOTE_OWNER_REMOTE = 2
+} BM_RemoteOwnerTypeDef;
+
+/** Current state of a remote control session. */
+typedef enum
+{
+    BM_REMOTE_SESSION_UNKNOWN = 0,
+    BM_REMOTE_SESSION_AVAILABLE = 1,
+    BM_REMOTE_SESSION_CLAIMED = 2,
+    BM_REMOTE_SESSION_EXPIRED = 3,
+    BM_REMOTE_SESSION_FAULTED = 4
+} BM_RemoteSessionStateTypeDef;
+
+/** Capabilities advertised by a remote control-session endpoint. */
+typedef enum
+{
+    BM_REMOTE_SESSION_CAP_NONE = 0,
+    BM_REMOTE_SESSION_CAP_CLAIM = 1U << 0,
+    BM_REMOTE_SESSION_CAP_HEARTBEAT = 1U << 1,
+    BM_REMOTE_SESSION_CAP_CHANNEL_RELEASE = 1U << 2,
+    BM_REMOTE_SESSION_CAP_CONTROL_STATUS = 1U << 3,
+    BM_REMOTE_SESSION_CAP_TX_SEQ_TRANSLATION = 1U << 4
+} BM_RemoteSessionCapabilityTypeDef;
+
+/** Protocol-level result reported for a remote control-session operation. */
+typedef enum
+{
+    BM_REMOTE_SESSION_RESULT_OK = 0,
+    BM_REMOTE_SESSION_RESULT_UNSUPPORTED = 1,
+    BM_REMOTE_SESSION_RESULT_BUSY = 2,
+    BM_REMOTE_SESSION_RESULT_STALE = 3,
+    BM_REMOTE_SESSION_RESULT_DENIED = 4,
+    BM_REMOTE_SESSION_RESULT_INVALID = 5,
+    BM_REMOTE_SESSION_RESULT_INTERNAL = 6
+} BM_RemoteSessionResultTypeDef;
+
+/** Configuration used when claiming a remote control session. */
+typedef struct
+{
+    uint32_t size;                  /**< Set to sizeof(BM_RemoteSessionConfigTypeDef). */
+    uint32_t version;               /**< Set to BM_REMOTE_SESSION_ABI_VERSION. */
+    uint32_t timeout_ms;            /**< Control-lock lease, 0 for the 10000 ms default. */
+    uint32_t heartbeat_interval_ms; /**< 0 for the 2000 ms default; at most half the lease. */
+    uint32_t flags;                 /**< Must be zero in ABI version 1. */
+    char client_name[32];           /**< Optional UTF-8 display name; NUL terminated. */
+    uint8_t reserved[44];
+} BM_RemoteSessionConfigTypeDef;
+
+/** Status and ownership information for a remote control session. */
+typedef struct
+{
+    uint32_t size;
+    uint32_t version;
+    uint32_t capabilities;
+    uint32_t state;
+    uint32_t result;
+    uint32_t timeout_ms;
+    uint32_t expires_in_ms;
+    uint32_t config_generation;
+    uint8_t session_id[16];
+    uint8_t owner_ipv4[4];
+    uint8_t owner_kind;
+    uint8_t reserved0[3];
+    char owner_name[32];
+    uint8_t reserved[32];
+} BM_RemoteSessionInfoTypeDef;
 
 /**
  * @enum  BM_LogLevelTypeDef
@@ -325,6 +412,7 @@ typedef enum
     BM_LIN_MESSAGE_FLAGS_SLEEP = 0x04U,                         /**< This is a sleep event */
     BM_LIN_MESSAGE_FLAGS_ENHANCED_CHECKSUM = 0x08U,             /**< Flag for enhanced checksum */
     BM_LIN_MESSAGE_FLAGS_USER_CHECKSUM = 0x10U,                 /**< Flag for user defined checksum, use value from 'CHECKSUM' field if USER_CHECKSUM==1  */
+    BM_LIN_MESSAGE_FLAGS_SYNC_BREAK = 0x20U,                    /**< TX: master emits LIN header only (break + sync + PID), without data/checksum. RX: header-only LIN frame detected on bus (break + sync + PID, no following data/checksum). */
 } BM_LinMessageFlagsTypeDef;
 
 /**
@@ -738,7 +826,7 @@ typedef struct {
     uint32_t SEQ : 7;                           /**< hardware-sync message ID, the ACK message's SEQ is always equal to the TX message's SEQ or TXTASK index */
     uint32_t ISTXTASK : 1;                      /**< A indicator for TXTASK TEF event, SEQ=TXTASK index if ISTXTASK=1 */
     uint32_t ERRORS : 6;                        /**< Error code, which is a bitmask, see BM_LinErrorTypeDef for details. */
-    uint32_t ID_PARITY : 1;                     /**< Parity bit */
+    uint32_t SYNC_BREAK : 1;                    /**< TX: master emits LIN header only (break + sync + PID), without data/checksum. RX: header-only LIN frame detected on bus (break + sync + PID, no following data/checksum). (Replaces the former unused ID_PARITY slot.) */
     uint32_t CHECKSUM : 8;                      /**< Checksum value */
 } BM_LinMessageCtrlTypeDef;
 
@@ -863,6 +951,32 @@ typedef struct
     uint8_t  dbtr0;                             /**< Data BTR0 register value, note this value is calculated using clockfreq, which might not be 16MHz */
     uint8_t  dbtr1;                             /**< Data BTR1 register value, note this value is calculated using clockfreq, which might not be 16MHz */
 } BM_BitrateTypeDef;
+
+/**
+ * @enum  BM_AutosetModeTypeDef
+ * @brief AUTOSET strategy used by BM_AutosetEx().
+ */
+typedef enum
+{
+    BM_AUTOSET_PASSIVE_LISTEN = 0,              /**< Listen-only detection: do not transmit or ACK CAN frames. */
+    BM_AUTOSET_ACTIVE_DETECT = 1,               /**< Active detection: send probe frames in normal mode and require TX ACK. */
+} BM_AutosetModeTypeDef;
+
+/**
+ * @typedef BM_AutosetConfigTypeDef
+ * @brief   AUTOSET configuration used by BM_AutosetEx().
+ */
+typedef struct
+{
+    uint8_t version;                            /**< Currently must be set to 0x01. */
+    uint8_t mode;                               /**< See BM_AutosetModeTypeDef for details. */
+    uint8_t minLockMessages;                    /**< Required RX or TX-ACK confirmations, values below 3 use the default minimum of 3. */
+    uint8_t reserved0;                          /**< Reserved, set to 0. */
+    uint16_t passiveObservationMs;              /**< Passive listen time per candidate, default is selected internally when set to 0. */
+    uint16_t activeWriteTimeoutMs;              /**< Active probe write timeout in milliseconds, default is 50 when set to 0. */
+    BM_CanMessageTypeDef probeMessage;          /**< Active probe CAN template; ID and payload are used, FD/BRS/DLC are adjusted per candidate. */
+    uint32_t reserved[4];                       /**< Reserved, set to 0. */
+} BM_AutosetConfigTypeDef;
 
 /**
  * @typedef BM_RxFilterTypeDef

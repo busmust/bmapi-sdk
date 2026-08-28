@@ -62,18 +62,22 @@ desktop.ini
 
 # Internal tools (not for public release)
 example/hpm_production_tool/
+example/hpm_device_info_repair/
 example/multichannel_logger/
 example/update_firmware_v3/
 example/bmcli/
+example/checksum_dll/
 
-# Legacy Python packages (moved to separate repos)
+# Python packages (maintained in separate repos)
 example/python-can-3.3.4/
 example/python-can-4.0.0/
+example/python-can-4.6.1/
 example/python-udsoncan-1.13.1/
 example/python-lin-1.0.0/
 
 # CICD / firmware artifacts
 version
+env
 update.bin
 
 # Documentation not for public release

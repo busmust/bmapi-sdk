@@ -830,6 +830,32 @@ Public Structure BM_BitrateTypeDef
     Public dbtr1 As Byte                       '**< Data BTR1 register value  note this value Is calculated Using clockfreq  which might Not be 16MHz *'
 End Structure
 
+Public Enum BM_AutosetModeTypeDef
+    BM_AUTOSET_PASSIVE_LISTEN = 0
+    BM_AUTOSET_ACTIVE_DETECT = 1
+End Enum
+
+<StructLayout(LayoutKind.Sequential)>
+Public Structure BM_AutosetProbeMessageTypeDef
+    Public id As UInteger
+    Public ctrl As UInteger
+    <MarshalAs(UnmanagedType.ByValArray, SizeConst:=64)>
+    Public payload() As Byte
+End Structure
+
+<StructLayout(LayoutKind.Sequential)>
+Public Structure BM_AutosetConfigTypeDef
+    Public version As Byte
+    Public mode As Byte
+    Public minLockMessages As Byte
+    Public reserved0 As Byte
+    Public passiveObservationMs As UShort
+    Public activeWriteTimeoutMs As UShort
+    Public probeMessage As BM_AutosetProbeMessageTypeDef
+    <MarshalAs(UnmanagedType.ByValArray, SizeConst:=4)>
+    Public reserved() As UInteger
+End Structure
+
 
 '**
 '* @typedef BM_RxFilterTypeDef
@@ -1108,6 +1134,14 @@ Public Structure BM_ReplayConfigTypeDef
     Public timing As BM_ReplayTimingTypeDef                '**< Replay timing'*/
 End Structure
 
+<UnmanagedFunctionPointer(CallingConvention.Cdecl)>
+Public Delegate Function BM_AutosetCallbackHandle(
+    ByRef bitrate As BM_BitrateTypeDef,
+    tres As BM_TerminalResistorTypeDef,
+    nrxmessages As Integer,
+    userarg As IntPtr
+) As UInteger
+
 Class BMAPI
     Public Const BM_DATA_TAIL_SIZE As UInteger = 16
     Public Const BM_DATA_HEADER_SIZE As UInteger = 8
@@ -1170,6 +1204,35 @@ Class BMAPI
     '*
     <DllImport("BMAPI.DLL", CallingConvention:=CallingConvention.Cdecl)>
     Public Shared Function BM_OpenCan(index As Integer) As IntPtr
+    End Function
+
+    '**
+    '* @brief Start AUTOSET sequence  For a BM-USB-CAN(FD) device  the AUTOSET sequence will detect the correct bitrate And terminal resistor.
+    '* @param[in]  channelinfo  Info Of the device channel To run AUTOSET on  usually the info Is filled by BM_Enumerate().
+    '* @param[out] bitrate      The detected bitrate.
+    '* @param[out] tres         The detected terminal resistor.
+    '* @param[in]  callback     A callback Function which will be called on Each step Of AUTOSET.
+    '* @param[in]  userarg      Arbitrary user argument Of the callback Function  this argument will be passed To the callback As is.
+    '*
+    <DllImport("BMAPI.DLL", CallingConvention:=CallingConvention.Cdecl)>
+    Public Shared Function BM_Autoset(
+        ByRef channelinfo As BM_ChannelInfoTypeDef,
+        ByRef bitrate As BM_BitrateTypeDef,
+        ByRef tres As BM_TerminalResistorTypeDef,
+        callback As BM_AutosetCallbackHandle,
+        userarg As IntPtr
+    ) As BM_StatusTypeDef
+    End Function
+
+    <DllImport("BMAPI.DLL", CallingConvention:=CallingConvention.Cdecl)>
+    Public Shared Function BM_AutosetEx(
+        ByRef channelinfo As BM_ChannelInfoTypeDef,
+        ByRef bitrate As BM_BitrateTypeDef,
+        ByRef tres As BM_TerminalResistorTypeDef,
+        ByRef config As BM_AutosetConfigTypeDef,
+        callback As BM_AutosetCallbackHandle,
+        userarg As IntPtr
+    ) As BM_StatusTypeDef
     End Function
 
     '**

@@ -1,17 +1,51 @@
 # Changelog
 
+## 1.14.2.43 [2026-08-28]
+
+1. Improved multi-device and multi-channel CAN/CAN FD transmit scheduling so a busy or temporarily stalled channel no longer delays other channels.
+2. Made device open, close, and hot-plug recovery transactional, fully rolling back resources and channel state on failure instead of publishing an unusable partial handle.
+3. Strengthened queue consistency for concurrent writes, batch transmission, and periodic transmission, fixing races that could disrupt sending.
+4. Fixed delayed writer wake-up after enabling a remote channel, reducing the wait before the first transmission on a newly established remote connection.
+5. Re-probed device capabilities and restored multiple handles safely after reconnect so stale pre-disconnect capabilities are not reused.
+6. Improved Windows XP and .NET 4.0 compatibility and strengthened receive, reopen, and exit stability in the C#, VB.NET, and Qt multi-channel examples under sustained traffic.
+
+## 1.14.1.42 [2026-08-14]
+
+1. Preserved asynchronous CAN/CAN FD writes across partial USB bulk transfers by retrying from the exact byte offset and releasing host TX queue data only after complete submission, preventing silent replay loss under device backpressure.
+
+## 1.14.0.42 [2026-07-27]
+
+1. Refactored the C#, VB.NET, and Qt CAN Analyzer examples to poll every channel until each returns `BM_ERROR_QRCVEMPTY`, batch UI updates, and cap display history at 5,000 messages, improving receive completeness and UI responsiveness under sustained traffic.
+2. Added the public remote control-session APIs `BM_QueryRemoteSession`, `BM_ClaimRemoteSession`, `BM_GetRemoteSessionInfo`, and `BM_ReleaseRemoteSession` for GWR/BMAPI multi-client control arbitration, with a versioned ABI for capability and result reporting, exclusive ownership of protected control operations, automatic heartbeat renewal and timeout cleanup, while normal data traffic remains shared.
+3. Completed the Windows `BM_AutosetEx` runtime export and import-library alignment so the public headers and released binaries expose the same API.
+4. Fixed a cleanup crash when initialization of the default BMAPI receive buffer fails.
+5. Improved Windows XP and .NET 4.0 compatibility by using nonblocking USB event polling in the BMAPI runtime to prevent synchronous Open/Close control I/O stalls, skipping unsupported PTP synchronization in the C# example on XP, and strengthening resource cleanup after channel-open failures.
+6. Fixed incorrect pending-bit clearing in `multichannel_rx_cpp` and `multichannel_logger` when the first channel number is not zero, and corrected the multi-channel PTP synchronization count to prevent receive loops from failing to finish or omitting a channel from synchronization.
+
+## 1.13.10.41 [2026-07-10]
+
+1. Added `BM_AutosetEx` with explicit passive-listen and active-probe strategies while preserving the existing `BM_Autoset` signature and behavior.
+2. Updated the `BM_AutosetCallbackHandle` ABI to return `uint32_t` (0 to continue, non-zero to cancel), and added configurable confirmation thresholds, observation/write timeouts, probe frames, and common CAN/CAN FD bitrate exploration.
+3. Synchronized the AutoSet declarations across C/C++, LabVIEW, C#, VB.NET, python-can, and python-lin bindings.
+4. Routed `BM_RecoverBusOff` by firmware capability: Gen2/Gen2.5 firmware 2.6.0.0+ and Gen3 firmware 3.1.0.0+ use firmware-side recovery, while older Gen2/Gen2.5 firmware and Gen3 3.0.x retain the legacy host fallback.
+
+## 1.13.8.41 [2026-06-30]
+
+1. Added LIN header-only SYNC_BREAK support: applications can set `BM_LIN_MESSAGE_FLAGS_SYNC_BREAK` / `BM_LinMessageCtrlTypeDef.SYNC_BREAK` to transmit a LIN header only (break + sync + PID, without data/checksum). TEF/RX messages use `BM_LinMessageCtrlTypeDef.SYNC_BREAK` to report this header-only operation. The field reuses the former unused `ID_PARITY` bit.
+2. C# examples (`can_analyzer_csharp`) compatibility improvements: replaced the third-party `ComboBoxCustomer.dll` with an in-tree `ComCheckBoxList` implementation, allowing the examples to run on Windows XP and .NET 4.0 targets.
+
 ## 1.13.7.40 [2026-06-21]
 
 1. Fixed ISO-TP timeout handling under background CAN/CAN FD traffic, improving software ISO-TP stability during diagnostic communication.
 2. Fixed BMAPI Python binding compatibility for TX task structures and ISO-TP send/receive paths used by python-can and udsoncan.
 
-## 1.13.6.40 [2025-05-15]
+## 1.13.6.40 [2026-05-15]
 
 1. Added `BM_RecoverBusOff` API for active Bus-off recovery, avoiding the impact of periodic polling on other channels' transmit periods; added `BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY` mode flag to allow users to disable automatic recovery
 2. Added `BM_HardwareLastMsgStat` API to get the hardware's latest transmitted message status
 3. Python LIN library removed python-can dependency, bundled aenum module, added `store_task=False` hardware transmit task demo
 
-## 1.13.5.39 [2025-01-23]
+## 1.13.5.39 [2026-01-23]
 
 1. From this version onwards, CICD fully automated builds are used. A fifth digit (Build Number) will be appended to the four-digit version number (e.g., 1.13.5.39)
 2. Fixed an issue where `BM_WriteIsotp` under CAN FD protocol (not CAN 2.0) sent non-conformant ISOTP messages when the payload length was smaller than the DLC capacity
@@ -19,7 +53,7 @@
 4. Reorganized SDK folder contents, standardized naming, optimized startup scripts, etc. Contact technical support if you encounter any issues
 5. Fixed an unexpected 32-bit timestamp rollover issue in the Python environment; timestamps now rely entirely on BMAPI.DLL
 
-## 1.13.3.38 [2024-12-30]
+## 1.13.3.38 [2025-12-30]
 
 1. **Critical BUGFIX!** Fixed a memory management error in the BMAPI base library introduced in September 2025, which caused long-running receive sessions to stop automatically, requiring a Disconnect/Connect cycle to resume reception
 2. Added `ECHO` attribute to the `ctrl.tx` member of `BM_CanfdMessageTypeDef`. When set, even with blocking `BM_Write` calls, an additional ACK message is received for echo purposes

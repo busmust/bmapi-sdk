@@ -398,30 +398,67 @@ void Widget::on_txButton_clicked(bool checked)
 
 void Widget::readPendingMessages(void)
 {
-    BM_DataTypeDef msg;
-    bool newMsgInserted = false;
-    for (int i = 0; i < openedChannelCount; i++)
+    if (openedChannelCount <= 0 || !msgTableModel)
     {
-        if (channels[i] && msgTableModel)
+        return;
+    }
+
+    QList<MsgDataTypeDef> batch;
+    uint32_t channelPending = openedChannelCount >= 32
+            ? UINT32_MAX
+            : (1U << openedChannelCount) - 1U;
+
+    while (channelPending)
+    {
+        for (int channelOffset = 0; channelOffset < openedChannelCount; channelOffset++)
         {
-            while (BM_Read(channels[i], &msg) == BM_ERROR_OK)
+            uint32_t channelBit = 1U << channelOffset;
+            if (!(channelPending & channelBit))
+            {
+                continue;
+            }
+
+            if (!channels[channelOffset])
+            {
+                channelPending &= ~channelBit;
+                continue;
+            }
+
+            BM_DataTypeDef msg;
+            BM_StatusTypeDef status = BM_Read(channels[channelOffset], &msg);
+            if (status == BM_ERROR_OK)
             {
                 MsgDataTypeDef data;
                 data.msg = msg;
-                data.port = i + 1;
-                if (BM_GetDataPtpTimestamp(channels[i], &msg, &data.utcts) != BM_ERROR_OK)
+                data.port = channelOffset + 1;
+                if (BM_GetDataPtpTimestamp(channels[channelOffset], &msg, &data.utcts) != BM_ERROR_OK)
                 {
                     // If failed to extract a PTP timestamp from data, use current time on host-machine.
                     data.utcts = BM_GetHostPtpTime();
                 }
-                msgTableModel->insertMessage(data);
-                newMsgInserted = true;
+                batch.push_back(data);
+            }
+            else if (status == BM_ERROR_QRCVEMPTY)
+            {
+                channelPending &= ~channelBit;
+            }
+            else
+            {
+                char errorText[256] = { 0 };
+                BM_GetErrorText(status, errorText, sizeof(errorText), 0);
+                qWarning("BM_Read failed on channel %d: %d (%s)",
+                         channelOffset + 1,
+                         status,
+                         errorText);
+                channelPending &= ~channelBit;
             }
         }
-        if (newMsgInserted)
-        {
-            ui->msgTableView->scrollToBottom();
-        }
+    }
+
+    if (!batch.isEmpty())
+    {
+        msgTableModel->insertMessages(batch);
+        ui->msgTableView->scrollToBottom();
     }
 }
 
@@ -537,6 +574,5 @@ void Widget::on_rxAdvancedFilterCheck_clicked(bool checked)
 {
     ui->rxDataMaskEdit->setEnabled(checked);
 }
-
 
 

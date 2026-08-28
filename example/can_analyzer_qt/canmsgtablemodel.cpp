@@ -161,30 +161,30 @@ QVariant CanMsgTableModel::data(const QModelIndex &index, int role) const
     return QVariant();
 }
 
-int CanMsgTableModel::insertMessage(const MsgDataTypeDef& msg)
+int CanMsgTableModel::insertMessages(const QList<MsgDataTypeDef>& messages)
 {
-    MsgDataTypeDef msgData = msg;
-    bool allChanged = false;
-    if (msgpool.size() > 1000000)
+    if (messages.isEmpty())
     {
-        beginRemoveRows(QModelIndex(), 0, 0);
-        msgpool.pop_front();
-        endRemoveRows();
-        allChanged = true;
+        return -1;
     }
-    int newItemRow = msgpool.size();
-    beginInsertRows(QModelIndex(), newItemRow, newItemRow);
-    msgpool.push_back(msgData);
-    endInsertRows();
 
-    if (allChanged)
+    int firstIncoming = qMax(0, messages.size() - MaxMessageCount);
+    int incomingCount = messages.size() - firstIncoming;
+    int removeCount = qMax(0, msgpool.size() + incomingCount - MaxMessageCount);
+    if (removeCount > 0)
     {
-        emit dataChanged(QModelIndex(), QModelIndex());
+        beginRemoveRows(QModelIndex(), 0, removeCount - 1);
+        msgpool.erase(msgpool.begin(), msgpool.begin() + removeCount);
+        endRemoveRows();
     }
-    else
+
+    int newItemRow = msgpool.size();
+    beginInsertRows(QModelIndex(), newItemRow, newItemRow + incomingCount - 1);
+    for (int i = firstIncoming; i < messages.size(); i++)
     {
-        emit dataChanged(index(newItemRow, 0), index(newItemRow, columnCount() - 1));
+        msgpool.push_back(messages.at(i));
     }
+    endInsertRows();
 
     return newItemRow;
 }
@@ -197,7 +197,5 @@ void CanMsgTableModel::clearAllMessages()
         beginRemoveRows(QModelIndex(), 0, n - 1);
         msgpool.clear();
         endRemoveRows();
-        emit dataChanged(QModelIndex(), QModelIndex());
     }
 }
-

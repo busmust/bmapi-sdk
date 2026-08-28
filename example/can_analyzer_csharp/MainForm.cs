@@ -8,16 +8,13 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
-using System.Collections.Generic;
 using System.Net.NetworkInformation;
-using System.Linq;
-using System.Runtime.Remoting.Channels;
+using System.Globalization;
 
 namespace can_analyzer_csharp
 {
     public partial class MainForm : Form
     {
-        private BM_CanMessageTypeDef rxMsgBuf;
         private BM_CanMessageTypeDef txMsgBuf;
         private BM_ChannelInfoTypeDef[] channelinfos = new BM_ChannelInfoTypeDef[32];
         private IntPtr[] channelHandles = new IntPtr[32];
@@ -27,17 +24,32 @@ namespace can_analyzer_csharp
         int nchannels = 0;////Number of enumerated channels
         private bool[] channelSelected = new bool[32];
         private uint pendingTxMsgCount;
+        private const int MaxDisplayedMessages = 5000;
+        private const int MaxXpMessagesPerTimerTick = 256;
+        private readonly List<ReceivedMessage> messageHistory = new List<ReceivedMessage>();
+
+        private sealed class ReceivedMessage
+        {
+            public int Channel;
+            public BM_CanMessageTypeDef CanMessage;
+            public uint Timestamp;
+            public ulong UtcTimestamp;
+            public bool IsTx;
+        }
+
         public MainForm()
         {
             InitializeComponent();
+            msgListView.VirtualMode = true;
+            msgListView.RetrieveVirtualItem += msgListView_RetrieveVirtualItem;
             Array.Clear(channelHandles, 0, channelHandles.Length);
             Array.Clear(channelSelected, 0, channelSelected.Length);
             this.openedChannelCount = 0;
             this.modeCombo.SelectedIndex = 0;
             this.txTypeCombo.SelectedIndex = 0;
-            this.rxMsgBuf = new BM_CanMessageTypeDef();
             this.txMsgBuf = new BM_CanMessageTypeDef();
             BMAPI.BM_Init();
+
             GetAvailableHostIpList();
             enumerate();
             hostComboBox.SelectedIndex = 0;
@@ -45,12 +57,26 @@ namespace can_analyzer_csharp
 
         public static ulong LocalTimeToNsSince1970()
         {
-            DateTimeOffset localTime = DateTimeOffset.Now;
-
-            ulong msSince1970 = (ulong)localTime.ToUnixTimeMilliseconds();
+            // .NET 4.0 lacks DateTimeOffset.ToUnixTimeMilliseconds() (added in 4.6); compute manually
+            DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            long ticks = DateTime.UtcNow.Ticks - epoch.Ticks;
+            ulong msSince1970 = (ulong)(ticks / TimeSpan.TicksPerMillisecond);
 
             return msSince1970 * 1000000;
         }
+
+        private static bool IsWindowsXpOrEarlier()
+        {
+            OperatingSystem operatingSystem = Environment.OSVersion;
+            return operatingSystem.Platform == PlatformID.Win32NT &&
+                operatingSystem.Version.Major < 6;
+        }
+
+        private readonly HashSet<string> selectedChannelNames = new HashSet<string>(StringComparer.Ordinal);
+        private static readonly uint[] ValidCanFdLengths = new uint[]
+        {
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64
+        };
 
         public static bool ParseIpAddress(string ipString, ref byte[] ipArray)
         {
@@ -72,6 +98,230 @@ namespace can_analyzer_csharp
                 }
                 ipArray[i] = (byte)value;
             }
+            return true;
+        }
+
+        private void ShowInputError(string message)
+        {
+            MessageBox.Show(this, message, "Invalid input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        private static bool TryParseHexUInt32(string text, uint maximum, out uint value)
+        {
+            value = 0;
+            string normalized = text == null ? String.Empty : text.Trim();
+            if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = normalized.Substring(2);
+            }
+
+            return normalized.Length > 0 &&
+                uint.TryParse(normalized, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value) &&
+                value <= maximum;
+        }
+
+        private static bool IsValidCanFdLength(uint length)
+        {
+            return Array.IndexOf(ValidCanFdLengths, length) >= 0;
+        }
+
+        private static bool IsChannelLossStatus(BM_StatusTypeDef status)
+        {
+            uint rawStatus = (uint)status;
+            uint handleStatus = rawStatus & (uint)BM_StatusTypeDef.BM_ERROR_ILLHANDLE;
+            return handleStatus == (uint)BM_StatusTypeDef.BM_ERROR_ILLHW ||
+                handleStatus == (uint)BM_StatusTypeDef.BM_ERROR_ILLNET ||
+                handleStatus == (uint)BM_StatusTypeDef.BM_ERROR_ILLCLIENT ||
+                (rawStatus & (uint)BM_StatusTypeDef.BM_ERROR_INITIALIZE) != 0 ||
+                (rawStatus & (uint)BM_StatusTypeDef.BM_ERROR_ILLOPERATION) != 0;
+        }
+
+        private bool TryBuildOpenConfiguration(out BM_BitrateTypeDef bitrate, out BM_RxFilterTypeDef[] rxfilters)
+        {
+            bitrate = new BM_BitrateTypeDef();
+            rxfilters = null;
+            BM_RxFilterTypeDef filterTemplate = new BM_RxFilterTypeDef
+            {
+                payload_mask = new byte[8],
+                payload_value = new byte[8]
+            };
+
+            ushort nominalBitrate;
+            ushort dataBitrate;
+            if (!ushort.TryParse(nominalBitrateEdit.Text, out nominalBitrate) || nominalBitrate == 0)
+            {
+                ShowInputError("Nominal bitrate must be a positive integer no greater than 65535 kbit/s.");
+                return false;
+            }
+            if (!ushort.TryParse(dataBitrateEdit.Text, out dataBitrate) || dataBitrate == 0)
+            {
+                ShowInputError("Data bitrate must be a positive integer no greater than 65535 kbit/s.");
+                return false;
+            }
+
+            bool acceptStandard = rxStandardCheck.Checked;
+            bool acceptExtended = rxExtendedCheck.Checked;
+            if (!acceptStandard && !acceptExtended)
+            {
+                acceptStandard = true;
+                acceptExtended = true;
+                rxStandardCheck.Checked = true;
+                rxExtendedCheck.Checked = true;
+            }
+
+            uint maximumRxId = acceptExtended ? 0x1FFFFFFFU : 0x7FFU;
+            uint rxId;
+            uint rxMask;
+            if (!TryParseHexUInt32(rxIdEdit.Text, maximumRxId, out rxId))
+            {
+                ShowInputError(acceptExtended
+                    ? "RX ID must be hexadecimal from 0 to 1FFFFFFF."
+                    : "Standard RX ID must be hexadecimal from 0 to 7FF.");
+                return false;
+            }
+            if (!TryParseHexUInt32(rxMaskEdit.Text, maximumRxId, out rxMask))
+            {
+                ShowInputError(acceptExtended
+                    ? "RX mask must be hexadecimal from 0 to 1FFFFFFF."
+                    : "Standard RX mask must be hexadecimal from 0 to 7FF.");
+                return false;
+            }
+            if (acceptStandard && acceptExtended && (rxId > 0x7FF || rxMask > 0x7FF))
+            {
+                ShowInputError("RX ID and mask must not exceed 7FF when both standard and extended frames are accepted.");
+                return false;
+            }
+
+            bitrate.nbitrate = nominalBitrate;
+            bitrate.dbitrate = dataBitrate;
+            bitrate.nsamplepos = Convert.ToByte(samplePosSpin.Value);
+            bitrate.dsamplepos = Convert.ToByte(samplePosSpin.Value);
+
+            filterTemplate.type = rxAdvancedFilterCheck.Checked
+                ? (byte)BM_RxFilterTypeTypeDef.BM_RXFILTER_ADVANCED
+                : (byte)BM_RxFilterTypeTypeDef.BM_RXFILTER_BASIC;
+
+            if (rxAdvancedFilterCheck.Checked)
+            {
+                string payload = rxDataMaskEdit.Text.Replace(" ", "").ToLowerInvariant().Replace('x', '0');
+                if (payload.Length > 16 || payload.Length % 2 != 0)
+                {
+                    ShowInputError("Advanced RX filter data must contain at most 8 complete hexadecimal bytes.");
+                    return false;
+                }
+                for (int i = 0; i < payload.Length / 2; i++)
+                {
+                    byte value;
+                    if (!byte.TryParse(payload.Substring(i * 2, 2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value))
+                    {
+                        ShowInputError("Advanced RX filter data contains an invalid hexadecimal byte.");
+                        return false;
+                    }
+                    filterTemplate.payload_mask[i] = value;
+                    filterTemplate.payload_value[i] = value;
+                }
+            }
+
+            List<BM_RxFilterTypeDef> filters = new List<BM_RxFilterTypeDef>(2);
+            if (acceptStandard)
+            {
+                BM_RxFilterTypeDef standardFilter = filterTemplate;
+                standardFilter.SetIdFilter(rxMask, rxId, false);
+                standardFilter.flags_mask = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
+                standardFilter.flags_value = 0;
+                filters.Add(standardFilter);
+            }
+            if (acceptExtended)
+            {
+                BM_RxFilterTypeDef extendedFilter = filterTemplate;
+                extendedFilter.SetIdFilter(rxMask, rxId, true);
+                extendedFilter.flags_mask = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
+                extendedFilter.flags_value = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
+                filters.Add(extendedFilter);
+            }
+            if (filters.Count == 1)
+            {
+                filters.Add(new BM_RxFilterTypeDef
+                {
+                    type = (byte)BM_RxFilterTypeTypeDef.BM_RXFILTER_INVALID,
+                    payload_mask = new byte[8],
+                    payload_value = new byte[8]
+                });
+            }
+            rxfilters = filters.ToArray();
+            return true;
+        }
+
+        private bool TryBuildTransmitMessage(out BM_CanMessageTypeDef message, out uint count, out int cycle)
+        {
+            message = new BM_CanMessageTypeDef();
+            count = 0;
+            cycle = 0;
+
+            uint maximumId = txExtendedCheck.Checked ? 0x1FFFFFFFU : 0x7FFU;
+            uint id;
+            if (!TryParseHexUInt32(txIdEdit.Text, maximumId, out id))
+            {
+                ShowInputError(txExtendedCheck.Checked
+                    ? "Extended CAN ID must be hexadecimal from 0 to 1FFFFFFF."
+                    : "Standard CAN ID must be hexadecimal from 0 to 7FF.");
+                return false;
+            }
+
+            uint length;
+            if (!uint.TryParse(txLengthEdit.Text, out length) ||
+                (txFdCheck.Checked ? !IsValidCanFdLength(length) : length > 8))
+            {
+                ShowInputError(txFdCheck.Checked
+                    ? "CAN FD length must be 0-8, 12, 16, 20, 24, 32, 48, or 64 bytes."
+                    : "Classic CAN length must be from 0 to 8 bytes.");
+                return false;
+            }
+
+            if (!uint.TryParse(txCountEdit.Text, out count) || count == 0)
+            {
+                ShowInputError("Count must be a positive integer.");
+                return false;
+            }
+            if (!int.TryParse(txCycleEdit.Text, out cycle) || cycle <= 0)
+            {
+                ShowInputError("Cycle must be a positive integer in milliseconds.");
+                return false;
+            }
+
+            string payload = txDataEdit.Text.Replace(" ", "");
+            if (payload.Length % 2 != 0)
+            {
+                ShowInputError("Payload must contain complete hexadecimal bytes.");
+                return false;
+            }
+            uint payloadLength = (uint)(payload.Length / 2);
+            if (payloadLength > length)
+            {
+                ShowInputError("Payload contains more bytes than the declared length.");
+                return false;
+            }
+
+            uint dlc = message.lengthToDlc(length);
+            message = new BM_CanMessageTypeDef(
+                id,
+                dlc,
+                txExtendedCheck.Checked,
+                false,
+                txFdCheck.Checked,
+                txFdCheck.Checked,
+                false);
+            for (int i = 0; i < payload.Length / 2; i++)
+            {
+                byte value;
+                if (!byte.TryParse(payload.Substring(i * 2, 2), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out value))
+                {
+                    ShowInputError("Payload contains an invalid hexadecimal byte.");
+                    return false;
+                }
+                message.payload[i] = value;
+            }
+
             return true;
         }
         public void GetAvailableHostIpList()
@@ -130,12 +380,23 @@ namespace can_analyzer_csharp
             }
             return false;
         }
+
+        private static void RetainEnumeratedChannelSelections(
+            HashSet<string> selectedNames,
+            HashSet<string> enumeratedNames)
+        {
+            selectedNames.IntersectWith(enumeratedNames);
+        }
+
         private void enumerate()
         {
             bool succeed = false;
             byte[] ip = { 192, 168, 41, 255 };
             bool remote = ParseIpAddress(hostComboBox.Text, ref ip);
             channelComboBox.Items.Clear();
+            Array.Clear(channelSelected, 0, channelSelected.Length);
+            Array.Clear(channelinfos, 0, channelinfos.Length);
+            nchannels = 0;
             int infoSize = Marshal.SizeOf(typeof(BM_ChannelInfoTypeDef));
             int nInfos = 32;
             IntPtr infoMem = Marshal.AllocHGlobal(nInfos * infoSize);
@@ -156,20 +417,26 @@ namespace can_analyzer_csharp
 
             if (succeed)
             {
-                nchannels = nInfos;
                 int ncanchannel = 0;
+                HashSet<string> enumeratedChannelNames = new HashSet<string>(StringComparer.Ordinal);
                 for (int i = 0; i < nInfos; i++)
                 {
                     IntPtr ptr = IntPtr.Add(infoMem, i * infoSize);
-                    BM_ChannelInfoTypeDef channelInfo = Marshal.PtrToStructure<BM_ChannelInfoTypeDef>(ptr);
+                    BM_ChannelInfoTypeDef channelInfo = (BM_ChannelInfoTypeDef)Marshal.PtrToStructure(ptr, typeof(BM_ChannelInfoTypeDef));
                     if ((channelInfo.cap & (ushort)BM_CapabilityTypeDef.BM_CAN_CAP) != 0)
                     {
                         channelinfos[ncanchannel] = channelInfo;
                         string name = channelInfo.GetName();
+                        enumeratedChannelNames.Add(name);
                         channelComboBox.Items.Add(name);
+                        bool keepSelected = selectedChannelNames.Contains(name);
+                        channelSelected[ncanchannel] = keepSelected;
+                        channelComboBox.SetItemChecked(ncanchannel, keepSelected);
                         ncanchannel++;
                     }
                 }
+                nchannels = ncanchannel;
+                RetainEnumeratedChannelSelections(selectedChannelNames, enumeratedChannelNames);
             }
 
             Marshal.FreeHGlobal(infoMem);
@@ -178,103 +445,100 @@ namespace can_analyzer_csharp
 
         private void openButton_Click(object sender, EventArgs e)
         {
-            bool success = true;
-            bool isOpen = this.openButton.Text == "Open" ? true : false;
-            int ninfos = 32;
-            IntPtr infomem = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BM_ChannelInfoTypeDef)) * ninfos);
+            bool isOpen = this.openButton.Text == "Open";
+            if (!isOpen)
+            {
+                CloseOpenedChannels();
+                return;
+            }
+
+            bool hasSelection = false;
             for (int i = 0; i < nchannels; i++)
             {
-                if (isOpen && channelSelected[i] == true)
+                hasSelection |= channelSelected[i];
+            }
+            if (!hasSelection)
+            {
+                return;
+            }
+
+            BM_BitrateTypeDef bitrate;
+            BM_RxFilterTypeDef[] rxfilters;
+            if (!TryBuildOpenConfiguration(out bitrate, out rxfilters))
+            {
+                return;
+            }
+
+            bool enablePtpSynchronization = !IsWindowsXpOrEarlier();
+            for (int i = 0; i < nchannels; i++)
+            {
+                if (channelSelected[i])
                 {
                     BM_CanModeTypeDef mode = (BM_CanModeTypeDef)modeCombo.SelectedIndex;
                     BM_TerminalResistorTypeDef tres = tresCheck.Checked ? BM_TerminalResistorTypeDef.BM_TRESISTOR_120 : BM_TerminalResistorTypeDef.BM_TRESISTOR_DISABLED;
-                    BM_BitrateTypeDef bitrate = new BM_BitrateTypeDef();
-                    bitrate.nbitrate = Convert.ToUInt16(nominalBitrateEdit.Text);
-                    bitrate.dbitrate = Convert.ToUInt16(dataBitrateEdit.Text);
-                    bitrate.nsamplepos = Convert.ToByte(samplePosSpin.Value);
-                    bitrate.dsamplepos = Convert.ToByte(samplePosSpin.Value);
-                    IntPtr rxfilterMem = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BM_RxFilterTypeDef)));
-                    BM_RxFilterTypeDef rxfilter = (BM_RxFilterTypeDef)Marshal.PtrToStructure(rxfilterMem, typeof(BM_RxFilterTypeDef));
-                    rxfilter.type = rxAdvancedFilterCheck.Checked ? (byte)BM_RxFilterTypeTypeDef.BM_RXFILTER_ADVANCED : (byte)BM_RxFilterTypeTypeDef.BM_RXFILTER_BASIC;
-                    rxfilter.SetIdFilter(Convert.ToUInt32(rxMaskEdit.Text, 16), Convert.ToUInt32(rxIdEdit.Text, 16), false);
-                    if (rxStandardCheck.Checked && !rxExtendedCheck.Checked)
-                    {
-                        rxfilter.flags_mask = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
-                        rxfilter.flags_value = 0;
-                    }
-                    else if (!rxStandardCheck.Checked && rxExtendedCheck.Checked)
-                    {
-                        rxfilter.flags_mask = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
-                        rxfilter.flags_value = (byte)BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE;
-                    }
-                    else
-                    {
-                        /* Default as all enabled */
-                        rxStandardCheck.Checked = true;
-                        rxExtendedCheck.Checked = true;
-                        rxfilter.flags_mask = 0;
-                        rxfilter.flags_value = 0;
-                    }
+                    int rxfilterSize = Marshal.SizeOf(typeof(BM_RxFilterTypeDef));
+                    IntPtr rxfilterMem = Marshal.AllocHGlobal(rxfilterSize * rxfilters.Length);
                     if (rxAdvancedFilterCheck.Checked)
                     {
-                        int j = 0;
-                        String payload = rxDataMaskEdit.Text.Replace(" ", "").ToLower().Replace('x', '0');
-                        while (j * 2 + 2 <= payload.Length)
-                        {
-                            rxfilter.payload_mask[j] = Convert.ToByte(payload.Substring(j * 2, 2), 16);
-                            rxfilter.payload_value[j] = rxfilter.payload_mask[j];
-                            j++;
-                        }
                         MessageBox.Show("Advanced RX filters are currently unsupported.", "Warning");
                         rxAdvancedFilterCheck.Enabled = false;
                     }
-                    Marshal.StructureToPtr(rxfilter, rxfilterMem, true);
-
-                    BM_StatusTypeDef openResult = BMAPI.BM_OpenEx(
-                        ref channelHandles[this.openedChannelCount],
-                        ref channelinfos[i],
-                        mode,
-                        tres,
-                        ref bitrate,
-                        rxfilterMem,
-                        1
-                    );
-
-                    if (this.channelHandles[this.openedChannelCount] == IntPtr.Zero)
+                    for (int filterIndex = 0; filterIndex < rxfilters.Length; filterIndex++)
                     {
-                        MessageBox.Show("Failed to open channel.", "Error");
-                        success = false;
+                        Marshal.StructureToPtr(rxfilters[filterIndex], IntPtr.Add(rxfilterMem, filterIndex * rxfilterSize), false);
                     }
-                    else
+
+                    BM_StatusTypeDef openResult;
+                    try
+                    {
+                        openResult = BMAPI.BM_OpenEx(
+                            ref channelHandles[this.openedChannelCount],
+                            ref channelinfos[i],
+                            mode,
+                            tres,
+                            ref bitrate,
+                            rxfilterMem,
+                            rxfilters.Length
+                        );
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(rxfilterMem);
+                    }
+
+                    if (openResult != BM_StatusTypeDef.BM_ERROR_OK ||
+                        this.channelHandles[this.openedChannelCount] == IntPtr.Zero)
+                    {
+                        if (this.channelHandles[this.openedChannelCount] != IntPtr.Zero)
+                        {
+                            BMAPI.BM_Close(this.channelHandles[this.openedChannelCount]);
+                            this.channelHandles[this.openedChannelCount] = IntPtr.Zero;
+                        }
+                        MessageBox.Show("Failed to open channel: " + openResult, "Error");
+                        CloseOpenedChannels();
+                        return;
+                    }
+
+                    if (enablePtpSynchronization)
                     {
                         ulong ns = LocalTimeToNsSince1970();
                         BMAPI.BM_SetPtpTime(channelHandles[this.openedChannelCount], ns);
-                        this.sendComboBox.Items.Add(this.openedChannelCount + 1);
+                        BMAPI.BM_SetPtpMode(channelHandles[this.openedChannelCount], BM_PtpModeTypeDef.BM_PTP_INPUT_USB_SOF);
                     }
-                    BMAPI.BM_SetPtpMode(channelHandles[this.openedChannelCount], BM_PtpModeTypeDef.BM_PTP_INPUT_USB_SOF);
+                    this.sendComboBox.Items.Add(this.openedChannelCount + 1);
                     this.openedChannelCount++;
-                }
-                else
-                {
-                    if (txButton.Text != "Transmit")
-                    {
-                        txButton_Click(null, null);
-                    }
-                    if (rxTimer != null)
-                    {
-                        rxTimer.Stop();
-                    }
                 }
             }
             // Sync PTP timestamp for all devices
-            if (BMAPI.BM_SyncPtpTimes(channelHandles, (int)openedChannelCount) != BM_StatusTypeDef.BM_ERROR_OK)
+            if (enablePtpSynchronization && openedChannelCount > 0 &&
+                BMAPI.BM_SyncPtpTimes(channelHandles, (int)openedChannelCount) != BM_StatusTypeDef.BM_ERROR_OK)
             {
                 Console.WriteLine("Failed to sync PTP timestamps.");
             }
-            if (isOpen && success && this.openedChannelCount > 0)
+            if (this.openedChannelCount > 0)
             {
                 sendComboBox.SelectedIndex = 0;
-                msgListView.Items.Clear();
+                ClearMessageHistory();
                 rxTimer = new System.Windows.Forms.Timer();
                 rxTimer.Interval = 50;
                 rxTimer.Tick += new EventHandler(this.readPendingMessages);
@@ -295,32 +559,80 @@ namespace can_analyzer_csharp
                 txButton.Enabled = true;
                 channelComboBox.Enabled = false;
             }
+        }
 
-            else
+        private void StopTransmission()
+        {
+            if (txTimer != null)
             {
-                for (int i = 0; i < this.openedChannelCount; i++)
-                {
-                    BMAPI.BM_Close(this.channelHandles[i]);
-                }
-                this.openedChannelCount = 0;
-                sendComboBox.Items.Clear();
-                sendComboBox.Text = "";
-                openButton.Text = "Open";
-                rxIdEdit.Enabled = true;
-                rxMaskEdit.Enabled = true;
-                rxExtendedCheck.Enabled = true;
-                rxStandardCheck.Enabled = true;
-                //rxAdvancedFilterCheck.Enabled = true;
-                rxDataMaskEdit.Enabled = rxAdvancedFilterCheck.Checked;
-                modeCombo.Enabled = true;
-                tresCheck.Enabled = true;
-                nominalBitrateEdit.Enabled = true;
-                dataBitrateEdit.Enabled = true;
-                samplePosSpin.Enabled = true;
-                enumerateButton.Enabled = true;
-                txButton.Enabled = false;
-                channelComboBox.Enabled = true;
+                txTimer.Stop();
+                txTimer.Tick -= this.writePendingMessages;
+                txTimer.Dispose();
+                txTimer = null;
             }
+            pendingTxMsgCount = 0;
+            txButton.Text = "Transmit";
+        }
+
+        private void CloseOpenedChannels()
+        {
+            StopTransmission();
+            if (rxTimer != null)
+            {
+                rxTimer.Stop();
+                rxTimer.Tick -= this.readPendingMessages;
+                rxTimer.Dispose();
+                rxTimer = null;
+            }
+
+            for (int i = 0; i < channelHandles.Length; i++)
+            {
+                if (channelHandles[i] != IntPtr.Zero)
+                {
+                    BMAPI.BM_Close(channelHandles[i]);
+                    channelHandles[i] = IntPtr.Zero;
+                }
+            }
+            openedChannelCount = 0;
+            sendComboBox.Items.Clear();
+            sendComboBox.Text = "";
+            openButton.Text = "Open";
+            rxIdEdit.Enabled = true;
+            rxMaskEdit.Enabled = true;
+            rxExtendedCheck.Enabled = true;
+            rxStandardCheck.Enabled = true;
+            rxDataMaskEdit.Enabled = rxAdvancedFilterCheck.Checked;
+            modeCombo.Enabled = true;
+            tresCheck.Enabled = true;
+            nominalBitrateEdit.Enabled = true;
+            dataBitrateEdit.Enabled = true;
+            samplePosSpin.Enabled = true;
+            enumerateButton.Enabled = true;
+            txButton.Enabled = false;
+            channelComboBox.Enabled = true;
+        }
+
+        private bool TryGetUnavailableOpenedChannel(out int channelNumber, out BM_StatusTypeDef failureStatus)
+        {
+            channelNumber = 0;
+            failureStatus = BM_StatusTypeDef.BM_ERROR_OK;
+            for (int i = 0; i < openedChannelCount; i++)
+            {
+                if (channelHandles[i] == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                BM_CanStatusInfoTypedef statusInfo = new BM_CanStatusInfoTypedef();
+                BM_StatusTypeDef status = BMAPI.BM_GetStatus(channelHandles[i], ref statusInfo);
+                if (IsChannelLossStatus(status))
+                {
+                    channelNumber = i + 1;
+                    failureStatus = status;
+                    return true;
+                }
+            }
+            return false;
         }
 
         private void rxAdvancedFilterCheck_CheckedChanged(object sender, EventArgs e)
@@ -335,56 +647,36 @@ namespace can_analyzer_csharp
 
         private void txButton_Click(object sender, EventArgs e)
         {
-            bool success = false;
-            bool isTransmit = this.txButton.Text == "Transmit" ? true : false;
+            bool isTransmit = this.txButton.Text == "Transmit";
+            if (!isTransmit)
+            {
+                StopTransmission();
+                return;
+            }
+
             int channelIndex = this.sendComboBox.SelectedIndex;
-            if (isTransmit && channelIndex >= 0 && this.channelHandles[channelIndex] != IntPtr.Zero)
+            if (channelIndex < 0 || this.channelHandles[channelIndex] == IntPtr.Zero)
             {
-                uint id = Convert.ToUInt32(txIdEdit.Text, 16);
-                uint length = Convert.ToUInt32(txLengthEdit.Text);
-                uint dlc = txMsgBuf.lengthToDlc(length);
-                uint[] DlcToDataBytes = new uint[]
-                {
-                    0,  1,  2,  3,  4,  5,  6,  7,
-                    8, 12, 16, 20, 24, 32, 48, 64,
-                };
-                uint dlcToLength = DlcToDataBytes[dlc];
-                if (dlcToLength != length)
-                {
-                    MessageBox.Show("According to ISO standard, CANFD message payload length could only be 0-8,12,16,20,24,32,48 or 64.", "Warning");
-                }
-                txMsgBuf = new BM_CanMessageTypeDef(id, dlc, txExtendedCheck.Checked, false, txFdCheck.Checked, txFdCheck.Checked, false);
-                String payload = txDataEdit.Text.Replace(" ", "");
-                int j = 0;
-                while (j * 2 + 2 <= payload.Length)
-                {
-                    this.txMsgBuf.payload[j] = Convert.ToByte(payload.Substring(j * 2, 2), 16);
-                    j++;
-                }
-                success = true;
+                ShowInputError("Select an open channel before transmitting.");
+                return;
             }
 
+            BM_CanMessageTypeDef message;
+            uint count;
+            int cycle;
+            if (!TryBuildTransmitMessage(out message, out count, out cycle))
+            {
+                return;
+            }
 
-            if (isTransmit && success)
-            {
-                this.pendingTxMsgCount = Convert.ToUInt32(txCountEdit.Text);
-                int cycle = Convert.ToInt32(txCycleEdit.Text);
-                txTimer = new System.Windows.Forms.Timer();
-                txTimer.Interval = cycle;
-                txTimer.Tick += new EventHandler(this.writePendingMessages);
-                txTimer.Start();
-                txButton.Text = "Stop";
-                writePendingMessages(null, null);
-            }
-            else
-            {
-                if (txTimer != null)
-                {
-                    txTimer.Stop();
-                }
-                pendingTxMsgCount = 0;
-                txButton.Text = "Transmit";
-            }
+            txMsgBuf = message;
+            pendingTxMsgCount = count;
+            txTimer = new System.Windows.Forms.Timer();
+            txTimer.Interval = cycle;
+            txTimer.Tick += new EventHandler(this.writePendingMessages);
+            txTimer.Start();
+            txButton.Text = "Stop";
+            writePendingMessages(null, null);
         }
         public static ulong GetUtcTimestamp(uint msgLen, BM_CanMessageTypeDef canMsg)
         {
@@ -395,7 +687,7 @@ namespace can_analyzer_csharp
             {
                 tailPtr = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BM_DataTailTypeDef)));
 
-                int structSize = Marshal.SizeOf<BM_CanMessageTypeDef>();
+                int structSize = Marshal.SizeOf(typeof(BM_CanMessageTypeDef));
                 bufferPtr = Marshal.AllocHGlobal(structSize);
                 Marshal.StructureToPtr(canMsg, bufferPtr, false);
 
@@ -427,30 +719,117 @@ namespace can_analyzer_csharp
 
         private void readPendingMessages(object source, EventArgs e)
         {
-            BM_DataTypeDef msg = new BM_DataTypeDef();
-            for (int i = 0; i < this.openedChannelCount; i++)
+            if (this.openedChannelCount == 0)
             {
-                if (this.channelHandles[i] != IntPtr.Zero)
+                return;
+            }
+
+            List<ReceivedMessage> batch = new List<ReceivedMessage>();
+            uint channelPending = this.openedChannelCount >= 32
+                ? uint.MaxValue
+                : (1U << (int)this.openedChannelCount) - 1U;
+            int maxMessagesThisTick = IsWindowsXpOrEarlier()
+                ? MaxXpMessagesPerTimerTick
+                : int.MaxValue;
+            BM_DataTypeDef msg = new BM_DataTypeDef();
+
+            while (channelPending != 0 && batch.Count < maxMessagesThisTick)
+            {
+                for (int channelOffset = 0;
+                    channelOffset < this.openedChannelCount && batch.Count < maxMessagesThisTick;
+                    channelOffset++)
                 {
-                    uint timestamp = 0;
-                    //msgListView.BeginUpdate();
-                    while (BMAPI.BM_Read(this.channelHandles[i], ref msg) == BM_StatusTypeDef.BM_ERROR_OK)
+                    uint channelBit = 1U << channelOffset;
+                    if ((channelPending & channelBit) == 0)
                     {
-                        this.rxMsgBuf = msg.can;
-                        timestamp = msg.timestamp;
-                        uint msgLen = msg.can.GetLength();
+                        continue;
+                    }
+
+                    if (this.channelHandles[channelOffset] == IntPtr.Zero)
+                    {
+                        channelPending &= ~channelBit;
+                        continue;
+                    }
+
+                    BM_StatusTypeDef status = BMAPI.BM_Read(this.channelHandles[channelOffset], ref msg);
+                    if (status == BM_StatusTypeDef.BM_ERROR_OK)
+                    {
                         ulong utcts = 0;
-                        if (BMAPI.BM_GetDataPtpTimestamp(this.channelHandles[i], ref msg, ref utcts) != BM_StatusTypeDef.BM_ERROR_OK)
+                        if (BMAPI.BM_GetDataPtpTimestamp(this.channelHandles[channelOffset], ref msg, ref utcts) != BM_StatusTypeDef.BM_ERROR_OK)
                         {
                             // If failed to extract a PTP timestamp from data, use current time on host-machine.
                             utcts = BMAPI.BM_GetHostPtpTime();
                         }
-                        bool istx = msg.header.IsAckData();
-                        DisplayMessage(i + 1, this.rxMsgBuf, timestamp, utcts, tx: istx);
-                    } 
-                    //msgListView.EndUpdate();
+
+                        batch.Add(new ReceivedMessage
+                        {
+                            Channel = channelOffset + 1,
+                            CanMessage = CloneCanMessage(msg.can),
+                            Timestamp = msg.timestamp,
+                            UtcTimestamp = utcts,
+                            IsTx = msg.header.IsAckData()
+                        });
+                    }
+                    else if (status == BM_StatusTypeDef.BM_ERROR_QRCVEMPTY)
+                    {
+                        channelPending &= ~channelBit;
+                    }
+                    else
+                    {
+                        channelPending &= ~channelBit;
+                        Console.Error.WriteLine(
+                            "BM_Read failed on channel {0}: {1}",
+                            channelOffset + 1,
+                            status);
+                    }
                 }
             }
+
+            AppendMessageBatch(batch);
+        }
+
+        private static BM_CanMessageTypeDef CloneCanMessage(BM_CanMessageTypeDef source)
+        {
+            BM_CanMessageTypeDef copy = source;
+            if (source.payload != null)
+            {
+                copy.payload = (byte[])source.payload.Clone();
+            }
+            return copy;
+        }
+
+        private void ClearMessageHistory()
+        {
+            messageHistory.Clear();
+            msgListView.VirtualListSize = 0;
+            msgListView.Invalidate();
+        }
+
+        private void AppendMessageBatch(IList<ReceivedMessage> batch)
+        {
+            if (batch.Count == 0)
+            {
+                return;
+            }
+
+            int firstIncoming = Math.Max(0, batch.Count - MaxDisplayedMessages);
+            int incomingCount = batch.Count - firstIncoming;
+            int removeCount = Math.Max(
+                0,
+                messageHistory.Count + incomingCount - MaxDisplayedMessages);
+            if (removeCount > 0)
+            {
+                messageHistory.RemoveRange(0, removeCount);
+            }
+
+            for (int i = firstIncoming; i < batch.Count; i++)
+            {
+                messageHistory.Add(batch[i]);
+            }
+
+            msgListView.VirtualListSize = messageHistory.Count;
+            msgListView.Invalidate();
+            msgListView.EnsureVisible(messageHistory.Count - 1);
         }
 
         private void writePendingMessages(object source, EventArgs e)
@@ -469,6 +848,24 @@ namespace can_analyzer_csharp
                         if (--pendingTxMsgCount <= 0)
                         {
                             txButton_Click(null, null);
+                        }
+                    }
+                    else
+                    {
+                        StopTransmission();
+                        if (IsChannelLossStatus(status))
+                        {
+                            CloseOpenedChannels();
+                            MessageBox.Show(
+                                this,
+                                "The transmit channel is no longer available (" + status + "). Re-enumerate the device and open it again.",
+                                "Channel disconnected",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning);
+                        }
+                        else
+                        {
+                            MessageBox.Show(this, "Failed to transmit message: " + status, "Transmit failed");
                         }
                     }
                 }
@@ -501,12 +898,23 @@ namespace can_analyzer_csharp
             str.Append(formatted);
             str.Append(microseconds.ToString("D6"));
         }
-        private void DisplayMessage(int i, BM_CanMessageTypeDef canMsg, uint timestamp, ulong utcts = 0, bool tx = false)
+        private void msgListView_RetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
+        {
+            if (e.ItemIndex < 0 || e.ItemIndex >= messageHistory.Count)
+            {
+                e.Item = new ListViewItem();
+                return;
+            }
+
+            e.Item = CreateMessageItem(messageHistory[e.ItemIndex]);
+        }
+
+        private static ListViewItem CreateMessageItem(ReceivedMessage received)
         {
             StringBuilder str = new StringBuilder(32);
-            if (utcts > 0)
+            if (received.UtcTimestamp > 0)
             {
-                TimevalToFormattedString(utcts, str, 32);
+                TimevalToFormattedString(received.UtcTimestamp, str, 32);
             }
             else
             {
@@ -514,17 +922,22 @@ namespace can_analyzer_csharp
                 str.Append("N/A");
             }
             ListViewItem item = new ListViewItem();
-            item.Text = Convert.ToString(timestamp * 1E-6f);
-            item.Text = Convert.ToString(timestamp * 1E-6f);
+            item.Text = Convert.ToString(received.Timestamp * 1E-6f);
             item.SubItems.Add(Convert.ToString(str));
-            item.SubItems.Add(tx ? "TX" : "RX");
-            item.SubItems.Add(Convert.ToString(i));
-            item.SubItems.Add(Convert.ToString(canMsg.GetID(), 16).ToUpper());
-            item.SubItems.Add(canMsg.GetTypeString());
-            item.SubItems.Add(Convert.ToString(canMsg.GetLength()));
-            item.SubItems.Add(canMsg.GetPyloadString());
-            msgListView.Items.Add(item);
-            msgListView.Items[msgListView.Items.Count - 1].EnsureVisible();
+            item.SubItems.Add(received.IsTx ? "TX" : "RX");
+            item.SubItems.Add(Convert.ToString(received.Channel));
+            item.SubItems.Add(Convert.ToString(received.CanMessage.GetID(), 16).ToUpper());
+            item.SubItems.Add(received.CanMessage.GetTypeString());
+            item.SubItems.Add(Convert.ToString(received.CanMessage.GetLength()));
+            item.SubItems.Add(received.CanMessage.GetPyloadString());
+            return item;
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            CloseOpenedChannels();
+            BMAPI.BM_UnInit();
+            base.OnFormClosing(e);
         }
 
         protected override void WndProc(ref Message m)
@@ -538,6 +951,22 @@ namespace can_analyzer_csharp
                     {
                         enumerate();
                     }
+                    else
+                    {
+                        int channelNumber;
+                        BM_StatusTypeDef failureStatus;
+                        if (TryGetUnavailableOpenedChannel(out channelNumber, out failureStatus))
+                        {
+                            selectedChannelNames.Clear();
+                            CloseOpenedChannels();
+                            MessageBox.Show(
+                                this,
+                                "Channel " + channelNumber + " is no longer available (" + failureStatus + "). Re-enumerate the device and open it again.",
+                                "Channel disconnected",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Warning);
+                        }
+                    }
                 }
             }
             catch (Exception ex)
@@ -550,8 +979,20 @@ namespace can_analyzer_csharp
         // See for details: https://www.shuzhiduo.com/A/1O5EZB2Gd7/
         private void channelComboBox_ItemClick(object sender, ItemCheckEventArgs e)
         {
-            channelSelected[e.Index] = !channelSelected[e.Index];
+            if (e.Index >= 0 && e.Index < nchannels && e.Index < channelSelected.Length)
+            {
+                bool isChecked = e.NewValue == CheckState.Checked;
+                channelSelected[e.Index] = isChecked;
+                string channelName = channelinfos[e.Index].GetName();
+                if (isChecked)
+                {
+                    selectedChannelNames.Add(channelName);
+                }
+                else
+                {
+                    selectedChannelNames.Remove(channelName);
+                }
+            }
         }
     }
 }
-

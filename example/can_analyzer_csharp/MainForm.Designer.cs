@@ -1,17 +1,5 @@
-﻿using static System.Windows.Forms.VisualStyles.VisualStyleElement;
-
-namespace can_analyzer_csharp
+﻿namespace can_analyzer_csharp
 {
-    public class DoubleBufferListView : System.Windows.Forms.ListView
-    {
-        public DoubleBufferListView()
-        {
-            SetStyle(System.Windows.Forms.ControlStyles.DoubleBuffer |
-              System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer |
-              System.Windows.Forms.ControlStyles.AllPaintingInWmPaint, true);
-            UpdateStyles();
-        }
-    }
     partial class MainForm
     {
         /// <summary>
@@ -45,7 +33,7 @@ namespace can_analyzer_csharp
             this.Label15 = new System.Windows.Forms.Label();
             this.hostComboBox = new System.Windows.Forms.ComboBox();
             this.label1 = new System.Windows.Forms.Label();
-            this.channelComboBox = new ComboBoxCustomer.ComCheckBoxList();
+            this.channelComboBox = new can_analyzer_csharp.ComCheckBoxList();
             this.tresCheck = new System.Windows.Forms.CheckBox();
             this.label2 = new System.Windows.Forms.Label();
             this.modeCombo = new System.Windows.Forms.ComboBox();
@@ -92,10 +80,8 @@ namespace can_analyzer_csharp
             this.columnHeader6 = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.columnHeader7 = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
             this.columnHeader8 = ((System.Windows.Forms.ColumnHeader)(new System.Windows.Forms.ColumnHeader()));
-            this.bMCanModeTypeDefBindingSource = new System.Windows.Forms.BindingSource(this.components);
             this.flowLayoutPanel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.samplePosSpin)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.bMCanModeTypeDefBindingSource)).BeginInit();
             this.SuspendLayout();
             // 
             // flowLayoutPanel1
@@ -191,7 +177,7 @@ namespace can_analyzer_csharp
             this.channelComboBox.Name = "channelComboBox";
             this.channelComboBox.Size = new System.Drawing.Size(310, 20);
             this.channelComboBox.TabIndex = 5;
-            this.channelComboBox.ItemClick += new ComboBoxCustomer.ComCheckBoxList.CheckBoxListItemClick(this.channelComboBox_ItemClick);
+            this.channelComboBox.ItemClick += new can_analyzer_csharp.ComCheckBoxList.CheckBoxListItemClick(this.channelComboBox_ItemClick);
             // 
             // tresCheck
             // 
@@ -652,11 +638,6 @@ namespace can_analyzer_csharp
             // 
             this.columnHeader8.Text = "Payload";
             this.columnHeader8.Width = 765;
-            //
-            // 
-            // bMCanModeTypeDefBindingSource
-            // 
-            this.bMCanModeTypeDefBindingSource.DataSource = typeof(BM_CanModeTypeDef);
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 12F);
@@ -673,7 +654,7 @@ namespace can_analyzer_csharp
             this.flowLayoutPanel1.ResumeLayout(false);
             this.flowLayoutPanel1.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.samplePosSpin)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.bMCanModeTypeDefBindingSource)).EndInit();            this.ResumeLayout(false);
+            this.ResumeLayout(false);
 
         }
 
@@ -698,7 +679,6 @@ namespace can_analyzer_csharp
         private System.Windows.Forms.TextBox rxIdEdit;
         private System.Windows.Forms.Label label7;
         private System.Windows.Forms.TextBox rxMaskEdit;
-        private System.Windows.Forms.BindingSource bMCanModeTypeDefBindingSource;
         private System.Windows.Forms.CheckBox rxExtendedCheck;
         private System.Windows.Forms.CheckBox rxAdvancedFilterCheck;
         private System.Windows.Forms.Label label8;
@@ -728,7 +708,7 @@ namespace can_analyzer_csharp
         private System.Windows.Forms.ColumnHeader columnHeader6;
         private System.Windows.Forms.ColumnHeader columnHeader7;
         private System.Windows.Forms.ColumnHeader columnHeader8;
-        private ComboBoxCustomer.ComCheckBoxList channelComboBox;
+        private can_analyzer_csharp.ComCheckBoxList channelComboBox;
         private System.Windows.Forms.Label label16;
         private System.Windows.Forms.ComboBox sendComboBox;
     }

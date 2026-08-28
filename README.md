@@ -99,6 +99,42 @@ Every application follows this basic flow:
 - **Thread safety**: `WriteXXX`/`ReadXXX` functions are thread-safe; `OpenEx` and `SetXXX` functions are **not**.
 - **BUSOFF recovery**: See the `recoverFromError()` function in `bmapi_transmit_only`.
 
+### Optional remote control lock
+
+GWR remote BMAPI connections support an optional control-session lock for
+multi-client control arbitration. It does not change `BM_EnumerateRemote`,
+`BM_OpenEx`, `BM_Read`, `BM_Write`, `BM_Close`, `BM_ChannelInfoTypeDef`, or
+existing capability bits. Legacy clients remain compatible and unlocked.
+
+New clients that need deterministic configuration use:
+
+```c
+BM_RemoteSessionInfoTypeDef info = {0};
+BM_RemoteSessionConfigTypeDef config = {0};
+BM_RemoteSessionHandle session = NULL;
+
+info.size = sizeof(info);
+info.version = BM_REMOTE_SESSION_ABI_VERSION;
+BM_QueryRemoteSession(server_ipv4, 1500, &info);
+
+config.size = sizeof(config);
+config.version = BM_REMOTE_SESSION_ABI_VERSION;
+config.timeout_ms = BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS;
+config.heartbeat_interval_ms = BM_REMOTE_SESSION_DEFAULT_HEARTBEAT_MS;
+BM_ClaimRemoteSession(&session, server_ipv4, &config, &info);
+
+/* BM_OpenEx / BM_Set* / BM_Read / BM_Write / BM_Close */
+
+BM_ReleaseRemoteSession(session);
+```
+
+The library sends heartbeats automatically. A failed claim returns
+`BM_ERROR_NETINUSE` and never silently falls back to unlocked mode. Ordinary
+message sending and passive reading remain shared; protected configuration and
+persistent jobs are exclusive. Applications should always release the session
+handle during normal cleanup; the configured timeout provides abnormal-exit
+recovery.
+
 ## Python Users
 
 See our companion packages for Python development:

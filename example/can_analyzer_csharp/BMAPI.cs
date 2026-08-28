@@ -366,7 +366,7 @@ public enum BM_LogLevelTypeDef
  * @typedef BM_DataTailTypeDef
  * @brief   Busmust data tail, each BM_DataTypeDef contains an optional (if header.hastail) tail which indicates packet side-band information, i.e. 64-bit UTC timestamp.
  */
-[StructLayout(LayoutKind.Sequential, Pack = 1)] // 按1字节对齐，与C语言#pragma pack(1)等效
+[StructLayout(LayoutKind.Sequential, Pack = 1)] // 1-byte alignment, equivalent to C's #pragma pack(1)
 public struct BM_DataTailTypeDef
 {
     public byte type;                                    /**< Tail type, reserved for future, default as zero. */
@@ -845,6 +845,35 @@ public struct BM_BitrateTypeDef
     public byte dbtr1;                               /**< Data BTR1 register value, note this value is calculated using clockfreq, which might not be 16MHz */
 };
 
+public enum BM_AutosetModeTypeDef
+{
+    BM_AUTOSET_PASSIVE_LISTEN = 0,
+    BM_AUTOSET_ACTIVE_DETECT = 1,
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_AutosetProbeMessageTypeDef
+{
+    public uint id;
+    public uint ctrl;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)]
+    public byte[] payload;
+};
+
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_AutosetConfigTypeDef
+{
+    public byte version;
+    public byte mode;
+    public byte minLockMessages;
+    public byte reserved0;
+    public ushort passiveObservationMs;
+    public ushort activeWriteTimeoutMs;
+    public BM_AutosetProbeMessageTypeDef probeMessage;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+    public uint[] reserved;
+};
+
 /**
  * @typedef BM_RxFilterTypeDef
  * @brief   CAN channel RX filter item structure, used by BM_SetRxFilter().
@@ -1122,6 +1151,14 @@ public struct BM_ReplayConfigTypeDef
     public BM_ReplayTimingTypeDef timing;               /* Replay timing */
 };
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint BM_AutosetCallbackHandle(
+    ref BM_BitrateTypeDef bitrate,
+    BM_TerminalResistorTypeDef tres,
+    int nrxmessages,
+    IntPtr userarg
+);
+
 
 class BMAPI
 {
@@ -1184,6 +1221,33 @@ class BMAPI
      */
     [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
     public static extern IntPtr BM_OpenCan(int index);
+
+    /**
+     * @brief Start AUTOSET sequence, for a BM-USB-CAN(FD) device, the AUTOSET sequence will detect the correct bitrate and terminal resistor.
+     * @param[in]  channelinfo  Info of the device channel to run AUTOSET on, usually the info is filled by BM_Enumerate().
+     * @param[out] bitrate      The detected bitrate.
+     * @param[out] tres         The detected terminal resistor.
+     * @param[in]  callback     A callback function which will be called on each step of AUTOSET.
+     * @param[in]  userarg      Arbitrary user argument of the callback function, this argument will be passed to the callback as is.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_Autoset(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    );
+
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_AutosetEx(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        ref BM_AutosetConfigTypeDef config,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    );
 
     /**
      * @brief Open the specified device port using given configuration.

@@ -4,15 +4,33 @@ Imports System.Windows.Forms
 Imports System.Net
 Imports System.Net.NetworkInformation
 Imports System.Collections.Generic
+Imports System.Globalization
 Partial Public Class MainForm
-    Private rxMsgBuf As BM_CanMessageTypeDef
     Private txMsgBuf As BM_CanMessageTypeDef
     Private channelinfos(31) As BM_ChannelInfoTypeDef
     Private channelHandles(31) As IntPtr
     Private openedChannelCount As Integer
     Private nchannels As Integer 'Number Of enumerated channels
     Private channelSelected(31) As Boolean
-    Private pendingTxMsgCount As Integer
+    Private ReadOnly selectedChannelNames As New HashSet(Of String)(StringComparer.Ordinal)
+    Private pendingTxMsgCount As UInteger
+    Private Const MaxDisplayedMessages As Integer = 5000
+    Private Const MaxXpMessagesPerTimerTick As Integer = 256
+    Private Const XpUsbCloseSettleMilliseconds As Integer = 500
+    Private Shared ReadOnly ValidCanFdLengths As UInteger() = {
+        0UI, 1UI, 2UI, 3UI, 4UI, 5UI, 6UI, 7UI, 8UI,
+        12UI, 16UI, 20UI, 24UI, 32UI, 48UI, 64UI
+    }
+    Private ReadOnly messageHistory As New List(Of ReceivedMessage)()
+
+    Private Class ReceivedMessage
+        Public Channel As Integer
+        Public CanMessage As BM_CanMessageTypeDef
+        Public Timestamp As Integer
+        Public UtcTimestamp As ULong
+        Public IsTx As Boolean
+    End Class
+
     Public Function ParseIpAddress(ipString As String, ByRef ipArray() As Byte) As Boolean
         Dim parts() As String = ipString.Split("."c)
         If parts.Length <> 4 Then
@@ -31,13 +49,15 @@ Partial Public Class MainForm
         Return True
     End Function
 
-    Public Sub MainForm()
+    Public Sub New()
+        InitializeComponent()
+        msgListView.VirtualMode = True
+        AddHandler msgListView.RetrieveVirtualItem, AddressOf msgListView_RetrieveVirtualItem
         Array.Clear(channelHandles, 0, channelHandles.Length)
         Array.Clear(channelSelected, 0, channelSelected.Length)
         openedChannelCount = 0
         modeCombo.SelectedIndex = 0
         txTypeCombo.SelectedIndex = 0
-        rxMsgBuf = New BM_CanMessageTypeDef()
         txMsgBuf = New BM_CanMessageTypeDef()
         BMAPI.BM_Init()
         GetAvailableHostIpList()
@@ -46,11 +66,230 @@ Partial Public Class MainForm
     End Sub
 
     Public Shared Function LocalTimeToNsSince1970() As ULong
-        Dim localTime As DateTimeOffset = DateTimeOffset.Now
-        Dim msSince1970 As Long = localTime.ToUnixTimeMilliseconds()
-        Return (msSince1970) * 1000000UL
+        Dim epoch As New DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        Dim ticks As Long = DateTime.UtcNow.Ticks - epoch.Ticks
+        Dim msSince1970 As ULong = CULng(ticks \ TimeSpan.TicksPerMillisecond)
+        Return msSince1970 * 1000000UL
     End Function
 
+    Private Shared Function IsWindowsXpOrEarlier() As Boolean
+        Dim operatingSystem As OperatingSystem = Environment.OSVersion
+        Return operatingSystem.Platform = PlatformID.Win32NT AndAlso
+            operatingSystem.Version.Major < 6
+    End Function
+
+
+    Private Sub ShowInputError(message As String)
+        MessageBox.Show(
+            Me,
+            message,
+            "Invalid input",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Warning)
+    End Sub
+
+    Private Shared Function TryParseHexUInt32(
+        text As String,
+        maximum As UInteger,
+        ByRef value As UInteger) As Boolean
+
+        value = 0
+        Dim normalized As String = If(text, String.Empty).Trim()
+        If normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase) Then
+            normalized = normalized.Substring(2)
+        End If
+
+        Return normalized.Length > 0 AndAlso
+            UInteger.TryParse(
+                normalized,
+                NumberStyles.AllowHexSpecifier,
+                CultureInfo.InvariantCulture,
+                value) AndAlso
+            value <= maximum
+    End Function
+
+    Private Shared Function IsValidCanFdLength(length As UInteger) As Boolean
+        Return Array.IndexOf(ValidCanFdLengths, length) >= 0
+    End Function
+
+    Private Shared Function IsChannelLossStatus(status As BM_StatusTypeDef) As Boolean
+        Dim rawStatus As UInteger = CUInt(status)
+        Dim handleStatus As UInteger = rawStatus And CUInt(BM_StatusTypeDef.BM_ERROR_ILLHANDLE)
+        Return handleStatus = CUInt(BM_StatusTypeDef.BM_ERROR_ILLHW) OrElse
+            handleStatus = CUInt(BM_StatusTypeDef.BM_ERROR_ILLNET) OrElse
+            handleStatus = CUInt(BM_StatusTypeDef.BM_ERROR_ILLCLIENT) OrElse
+            (rawStatus And CUInt(BM_StatusTypeDef.BM_ERROR_INITIALIZE)) <> 0 OrElse
+            (rawStatus And CUInt(BM_StatusTypeDef.BM_ERROR_ILLOPERATION)) <> 0
+    End Function
+
+    Private Function TryBuildOpenConfiguration(
+        ByRef bitrate As BM_BitrateTypeDef,
+        ByRef rxfilter As BM_RxFilterTypeDef) As Boolean
+
+        bitrate = New BM_BitrateTypeDef()
+        rxfilter = New BM_RxFilterTypeDef() With {
+            .payload_mask = New Byte(7) {},
+            .payload_value = New Byte(7) {}
+        }
+
+        Dim nominalBitrate As UShort
+        Dim dataBitrate As UShort
+        If Not UShort.TryParse(nominalBitrateEdit.Text, nominalBitrate) OrElse
+            nominalBitrate = 0 Then
+            ShowInputError("Nominal bitrate must be a positive integer no greater than 65535 kbit/s.")
+            Return False
+        End If
+        If Not UShort.TryParse(dataBitrateEdit.Text, dataBitrate) OrElse
+            dataBitrate = 0 Then
+            ShowInputError("Data bitrate must be a positive integer no greater than 65535 kbit/s.")
+            Return False
+        End If
+
+        Dim acceptStandard As Boolean = rxStandardCheck.Checked
+        Dim acceptExtended As Boolean = rxExtendedCheck.Checked
+        If Not acceptStandard AndAlso Not acceptExtended Then
+            acceptStandard = True
+            acceptExtended = True
+            rxStandardCheck.Checked = True
+            rxExtendedCheck.Checked = True
+        End If
+
+        Dim maximumRxId As UInteger = If(acceptExtended, &H1FFFFFFFUI, &H7FFUI)
+        Dim rxId As UInteger
+        Dim rxMask As UInteger
+        If Not TryParseHexUInt32(rxIdEdit.Text, maximumRxId, rxId) Then
+            ShowInputError(If(
+                acceptExtended,
+                "RX ID must be hexadecimal from 0 to 1FFFFFFF.",
+                "Standard RX ID must be hexadecimal from 0 to 7FF."))
+            Return False
+        End If
+        If Not TryParseHexUInt32(rxMaskEdit.Text, maximumRxId, rxMask) Then
+            ShowInputError(If(
+                acceptExtended,
+                "RX mask must be hexadecimal from 0 to 1FFFFFFF.",
+                "Standard RX mask must be hexadecimal from 0 to 7FF."))
+            Return False
+        End If
+
+        bitrate.nbitrate = nominalBitrate
+        bitrate.dbitrate = dataBitrate
+        bitrate.nsamplepos = Convert.ToByte(samplePosSpin.Value)
+        bitrate.dsamplepos = Convert.ToByte(samplePosSpin.Value)
+
+        rxfilter.type = CByte(If(
+            rxAdvancedFilterCheck.Checked,
+            BM_RxFilterTypeTypeDef.BM_RXFILTER_ADVANCED,
+            BM_RxFilterTypeTypeDef.BM_RXFILTER_BASIC))
+        rxfilter.SetIdFilter(
+            CInt(rxMask),
+            CInt(rxId),
+            rxId > &H7FFUI OrElse rxMask > &H7FFUI)
+        If acceptStandard AndAlso Not acceptExtended Then
+            rxfilter.flags_mask = CByte(BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE)
+            rxfilter.flags_value = 0
+        ElseIf Not acceptStandard AndAlso acceptExtended Then
+            rxfilter.flags_mask = CByte(BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE)
+            rxfilter.flags_value = CByte(BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE)
+        End If
+
+        If rxAdvancedFilterCheck.Checked Then
+            Dim payload As String = rxDataMaskEdit.Text.Replace(" ", "").ToLowerInvariant().Replace("x"c, "0"c)
+            If payload.Length > 16 OrElse payload.Length Mod 2 <> 0 Then
+                ShowInputError("Advanced RX filter data must contain at most 8 complete hexadecimal bytes.")
+                Return False
+            End If
+            For i As Integer = 0 To payload.Length \ 2 - 1
+                Dim value As Byte
+                If Not Byte.TryParse(
+                    payload.Substring(i * 2, 2),
+                    NumberStyles.AllowHexSpecifier,
+                    CultureInfo.InvariantCulture,
+                    value) Then
+                    ShowInputError("Advanced RX filter data contains an invalid hexadecimal byte.")
+                    Return False
+                End If
+                rxfilter.payload_mask(i) = value
+                rxfilter.payload_value(i) = value
+            Next
+        End If
+
+        Return True
+    End Function
+
+    Private Function TryBuildTransmitMessage(
+        ByRef message As BM_CanMessageTypeDef,
+        ByRef count As UInteger,
+        ByRef cycle As Integer) As Boolean
+
+        message = New BM_CanMessageTypeDef()
+        count = 0
+        cycle = 0
+
+        Dim maximumId As UInteger = If(txExtendedCheck.Checked, &H1FFFFFFFUI, &H7FFUI)
+        Dim id As UInteger
+        If Not TryParseHexUInt32(txIdEdit.Text, maximumId, id) Then
+            ShowInputError(If(
+                txExtendedCheck.Checked,
+                "Extended CAN ID must be hexadecimal from 0 to 1FFFFFFF.",
+                "Standard CAN ID must be hexadecimal from 0 to 7FF."))
+            Return False
+        End If
+
+        Dim length As UInteger
+        If Not UInteger.TryParse(txLengthEdit.Text, length) OrElse
+            If(txFdCheck.Checked, Not IsValidCanFdLength(length), length > 8UI) Then
+            ShowInputError(If(
+                txFdCheck.Checked,
+                "CAN FD length must be 0-8, 12, 16, 20, 24, 32, 48, or 64 bytes.",
+                "Classic CAN length must be from 0 to 8 bytes."))
+            Return False
+        End If
+
+        If Not UInteger.TryParse(txCountEdit.Text, count) OrElse count = 0 Then
+            ShowInputError("Count must be a positive integer.")
+            Return False
+        End If
+        If Not Integer.TryParse(txCycleEdit.Text, cycle) OrElse cycle <= 0 Then
+            ShowInputError("Cycle must be a positive integer in milliseconds.")
+            Return False
+        End If
+
+        Dim payload As String = txDataEdit.Text.Replace(" ", "")
+        If payload.Length Mod 2 <> 0 Then
+            ShowInputError("Payload must contain complete hexadecimal bytes.")
+            Return False
+        End If
+        Dim payloadLength As UInteger = CUInt(payload.Length \ 2)
+        If payloadLength > length Then
+            ShowInputError("Payload contains more bytes than the declared length.")
+            Return False
+        End If
+
+        Dim dlc As Integer = message.lengthToDLc(CInt(length))
+        message.BM_CanMessageTypeDef(
+            CInt(id),
+            dlc,
+            txExtendedCheck.Checked,
+            False,
+            txFdCheck.Checked,
+            txFdCheck.Checked,
+            False)
+        For i As Integer = 0 To payload.Length \ 2 - 1
+            Dim value As Byte
+            If Not Byte.TryParse(
+                payload.Substring(i * 2, 2),
+                NumberStyles.AllowHexSpecifier,
+                CultureInfo.InvariantCulture,
+                value) Then
+                ShowInputError("Payload contains an invalid hexadecimal byte.")
+                Return False
+            End If
+            message.payload(i) = value
+        Next
+
+        Return True
+    End Function
 
     Public Sub GetAvailableHostIpList()
         Dim allIps As New List(Of String)()
@@ -95,105 +334,93 @@ Partial Public Class MainForm
         Next
         Return False
     End Function
-    Private Function enumerate()
+    Private Sub enumerate()
         Dim succeed As Boolean = False
 
         Dim ip As Byte() = {192, 168, 41, 255}
         Dim remote As Boolean = ParseIpAddress(hostComboBox.Text, ip)
         channelComboBox.Items.Clear()
+        Array.Clear(channelSelected, 0, channelSelected.Length)
+        Array.Clear(channelinfos, 0, channelinfos.Length)
+        nchannels = 0
         Dim infosize As Integer = Marshal.SizeOf(GetType(BM_ChannelInfoTypeDef))
         Dim ninfos As Integer = 32
-        Dim infomem As IntPtr
-        infomem = Marshal.AllocHGlobal(ninfos * infosize)
+        Dim infomem As IntPtr = Marshal.AllocHGlobal(ninfos * infosize)
 
-        If remote Then
-            If BMAPI.BM_EnumerateRemote(infomem, ninfos, ip, 100) = BM_StatusTypeDef.BM_ERROR_OK Then
-                succeed = True
-            End If
-        Else
-            If BMAPI.BM_EnumerateByCap(infomem, ninfos, CType(BM_CapabilityTypeDef.BM_CAN_CAP, UShort)) = BM_StatusTypeDef.BM_ERROR_OK Then
-                succeed = True
-            End If
-        End If
-
-        If succeed Then
-            nchannels = ninfos
-            Dim ncanchannel As Integer = 0
-            For i As Integer = 0 To ninfos - 1
-                Dim ptr As IntPtr = (infomem.ToInt64() + i * infosize)
-                Dim channelInfo As BM_ChannelInfoTypeDef = Marshal.PtrToStructure(ptr, GetType(BM_ChannelInfoTypeDef))
-                If (channelInfo.cap And BM_CapabilityTypeDef.BM_CAN_CAP) <> 0 Then
-                    Dim name As String = channelInfo.GetName()
-                    channelComboBox.AddItems(name)
-                    channelinfos(ncanchannel) = channelInfo
-                    ncanchannel += 1
+        Try
+            If remote Then
+                If BMAPI.BM_EnumerateRemote(infomem, ninfos, ip, 100) = BM_StatusTypeDef.BM_ERROR_OK Then
+                    succeed = True
                 End If
-            Next
-        End If
-        Marshal.FreeHGlobal(infomem)
-        Return vbNull
-    End Function
+            Else
+                If BMAPI.BM_EnumerateByCap(infomem, ninfos, CType(BM_CapabilityTypeDef.BM_CAN_CAP, UShort)) = BM_StatusTypeDef.BM_ERROR_OK Then
+                    succeed = True
+                End If
+            End If
+
+            If succeed Then
+                Dim ncanchannel As Integer = 0
+                For i As Integer = 0 To ninfos - 1
+                    Dim ptr As IntPtr = New IntPtr(infomem.ToInt64() + CLng(i) * infosize)
+                    Dim channelInfo As BM_ChannelInfoTypeDef = DirectCast(
+                        Marshal.PtrToStructure(ptr, GetType(BM_ChannelInfoTypeDef)),
+                        BM_ChannelInfoTypeDef)
+                    If (channelInfo.cap And BM_CapabilityTypeDef.BM_CAN_CAP) <> 0 Then
+                        Dim name As String = channelInfo.GetName()
+                        channelComboBox.Items.Add(name)
+                        channelinfos(ncanchannel) = channelInfo
+                        Dim keepSelected As Boolean = selectedChannelNames.Contains(name)
+                        channelSelected(ncanchannel) = keepSelected
+                        channelComboBox.SetItemChecked(ncanchannel, keepSelected)
+                        ncanchannel += 1
+                    End If
+                Next
+                nchannels = ncanchannel
+            End If
+        Finally
+            Marshal.FreeHGlobal(infomem)
+        End Try
+    End Sub
 
     Private Sub openButton_Click(sender As Object, e As EventArgs) Handles openButton.Click
-        Dim success As Boolean = True
-        Dim isOpen As Boolean = False
-        Dim infomem As IntPtr
-        Dim tres As BM_TerminalResistorTypeDef
-        If openButton.Text = "Open" Then
-            isOpen = True
+        Dim isOpen As Boolean = openButton.Text = "Open"
+        If Not isOpen Then
+            CloseOpenedChannels()
+            Return
         End If
-        Dim ninfos As Integer = 32
-        infomem = Marshal.AllocHGlobal(Marshal.SizeOf(GetType(BM_ChannelInfoTypeDef)))
+
+        Dim hasSelection As Boolean = False
         For i As Integer = 0 To nchannels - 1
-            If (isOpen And channelSelected(i)) Then
-                Dim mode As BM_CanModeTypeDef = modeCombo.SelectedIndex
-                If tresCheck.Checked Then
-                    tres = BM_TerminalResistorTypeDef.BM_TRESISTOR_120
-                Else
-                    tres = BM_TerminalResistorTypeDef.BM_TRESISTOR_DISABLED
-                End If
+            hasSelection = hasSelection OrElse channelSelected(i)
+        Next
+        If Not hasSelection Then
+            Return
+        End If
 
-                Dim bitrate As BM_BitrateTypeDef = New BM_BitrateTypeDef()
-                bitrate.nbitrate = Convert.ToUInt16(nominalBitrateEdit.Text)
-                bitrate.dbitrate = Convert.ToUInt16(dataBitrateEdit.Text)
-                bitrate.nsamplepos = Convert.ToByte(samplePosSpin.Value)
-                bitrate.dsamplepos = Convert.ToByte(samplePosSpin.Value)
+        Dim bitrate As BM_BitrateTypeDef
+        Dim rxfilter As New BM_RxFilterTypeDef()
+        If Not TryBuildOpenConfiguration(bitrate, rxfilter) Then
+            Return
+        End If
+
+        Dim enablePtpSynchronization As Boolean = Not IsWindowsXpOrEarlier()
+        For i As Integer = 0 To nchannels - 1
+            If channelSelected(i) Then
+                Dim mode As BM_CanModeTypeDef = CType(modeCombo.SelectedIndex, BM_CanModeTypeDef)
+                Dim tres As BM_TerminalResistorTypeDef = If(
+                    tresCheck.Checked,
+                    BM_TerminalResistorTypeDef.BM_TRESISTOR_120,
+                    BM_TerminalResistorTypeDef.BM_TRESISTOR_DISABLED)
                 Dim rxfilterMem As IntPtr = Marshal.AllocHGlobal(Marshal.SizeOf(GetType(BM_RxFilterTypeDef)))
-                Dim rxfilter As BM_RxFilterTypeDef = Marshal.PtrToStructure(rxfilterMem, GetType(BM_RxFilterTypeDef))
                 If rxAdvancedFilterCheck.Checked Then
-                    rxfilter.type = BM_RxFilterTypeTypeDef.BM_RXFILTER_ADVANCED
-                Else
-                    rxfilter.type = BM_RxFilterTypeTypeDef.BM_RXFILTER_BASIC
-                End If
-                rxfilter.SetIdFilter(Convert.ToUInt32(rxMaskEdit.Text, 16), Convert.ToUInt32(rxIdEdit.Text, 16), False)
-                If (rxStandardCheck.Checked And Not (rxExtendedCheck.Checked)) Then
-                    rxfilter.flags_mask = BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE
-                    rxfilter.flags_value = 0
-                ElseIf (Not (rxStandardCheck.Checked) And rxExtendedCheck.Checked) Then
-                    rxfilter.flags_mask = BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE
-                    rxfilter.flags_value = BM_MessageFlagsTypeDef.BM_MESSAGE_FLAGS_IDE
-                Else
-                    '/* Default as all enabled */
-                    rxStandardCheck.Checked = True
-                    rxExtendedCheck.Checked = True
-                    rxfilter.flags_mask = 0
-                    rxfilter.flags_value = 0
-                End If
-
-                If (rxAdvancedFilterCheck.Checked) Then
-                    Dim j As Integer
-                    Dim payload As String = rxDataMaskEdit.Text.Replace(" ", "").ToLower().Replace("x", "0")
-                    While (j * 2 + 2 <= payload.Length)
-                        rxfilter.payload_mask(j) = Convert.ToByte(payload.Substring(j * 2, 2), 16)
-                        rxfilter.payload_value(j) = rxfilter.payload_mask(j)
-                        j = j + 1
-                    End While
-                    System.Windows.Forms.MessageBox.Show("Advanced RX filters are currently unsupported.", "Warning")
+                    MessageBox.Show("Advanced RX filters are currently unsupported.", "Warning")
                     rxAdvancedFilterCheck.Enabled = False
                 End If
-                Marshal.StructureToPtr(rxfilter, rxfilterMem, True)
+                Marshal.StructureToPtr(rxfilter, rxfilterMem, False)
 
-                Dim openResult As BM_StatusTypeDef = BMAPI.BM_OpenEx(
+                Dim openResult As BM_StatusTypeDef
+                Try
+                    openResult = BMAPI.BM_OpenEx(
                         channelHandles(openedChannelCount),
                         channelinfos(i),
                         mode,
@@ -202,140 +429,185 @@ Partial Public Class MainForm
                         rxfilterMem,
                         1
                     )
+                Finally
+                    Marshal.FreeHGlobal(rxfilterMem)
+                End Try
 
-                If (openResult = BM_StatusTypeDef.BM_ERROR_OK) Then
+                If openResult <> BM_StatusTypeDef.BM_ERROR_OK OrElse
+                    channelHandles(openedChannelCount) = IntPtr.Zero Then
+                    MessageBox.Show("Failed to open channel: " & openResult.ToString(), "Error")
+                    CloseOpenedChannels()
+                    Return
+                End If
+
+                If enablePtpSynchronization Then
                     Dim ns As ULong = LocalTimeToNsSince1970()
                     BMAPI.BM_SetPtpTime(channelHandles(openedChannelCount), ns)
-                    sendComboBox.Items.Add(openedChannelCount + 1)
-                    openedChannelCount = openedChannelCount + 1
-                Else
-                    System.Windows.Forms.MessageBox.Show("Failed to open channel.", "Error")
-                    success = False
+                    BMAPI.BM_SetPtpMode(channelHandles(openedChannelCount), BM_PtpModeTypeDef.BM_PTP_INPUT_USB_SOF)
                 End If
-                BMAPI.BM_SetPtpMode(channelHandles(openedChannelCount), BM_PtpModeTypeDef.BM_PTP_INPUT_USB_SOF)
-            Else
-                If (Not (txButton.Text = "Transmit")) Then
-                    txButton_Click()
-                End If
-
-                If (rxTimer.Enabled) Then
-                    rxTimer.Stop()
-                End If
+                sendComboBox.Items.Add(openedChannelCount + 1)
+                openedChannelCount += 1
             End If
         Next
-        '// Sync PTP timestamp for all devices
-        If Not (BMAPI.BM_SyncPtpTimes(channelHandles, openedChannelCount) = BM_StatusTypeDef.BM_ERROR_OK) Then
+
+        If enablePtpSynchronization AndAlso openedChannelCount > 0 AndAlso
+            BMAPI.BM_SyncPtpTimes(channelHandles, openedChannelCount) <> BM_StatusTypeDef.BM_ERROR_OK Then
             Console.WriteLine("Failed to sync PTP timestamps.")
         End If
-        If (isOpen And success And openedChannelCount > 0) Then
-                sendComboBox.SelectedIndex = 0
-                msgListView.Items.Clear()
-                rxTimer = New System.Windows.Forms.Timer()
-                rxTimer.Interval = 50
-                rxTimer.Start()
-                openButton.Text = "Close"
-                rxIdEdit.Enabled = False
-                rxMaskEdit.Enabled = False
-                rxExtendedCheck.Enabled = False
-                rxStandardCheck.Enabled = False
-                'rxAdvancedFilterCheck.Enabled = false
-                rxDataMaskEdit.Enabled = False
-                modeCombo.Enabled = False
-                tresCheck.Enabled = False
-                nominalBitrateEdit.Enabled = False
-                dataBitrateEdit.Enabled = False
-                samplePosSpin.Enabled = False
-                enumerateButton.Enabled = False
-                txButton.Enabled = True
-                channelComboBox.Enabled = False
-
-            Else
-                For j As Integer = 0 To openedChannelCount - 1
-                    BMAPI.BM_Close(channelHandles(j))
-                Next
-                openedChannelCount = 0
-                sendComboBox.Items.Clear()
-                sendComboBox.Text = ""
-                openButton.Text = "Open"
-                rxIdEdit.Enabled = True
-                rxMaskEdit.Enabled = True
-                rxExtendedCheck.Enabled = True
-                rxStandardCheck.Enabled = True
-                'rxAdvancedFilterCheck.Enabled = true
-                rxDataMaskEdit.Enabled = rxAdvancedFilterCheck.Checked
-                modeCombo.Enabled = True
-                tresCheck.Enabled = True
-                nominalBitrateEdit.Enabled = True
-                dataBitrateEdit.Enabled = True
-                samplePosSpin.Enabled = True
-                enumerateButton.Enabled = True
-                txButton.Enabled = False
-                channelComboBox.Enabled = True
-            End If
-
+        If openedChannelCount > 0 Then
+            sendComboBox.SelectedIndex = 0
+            ClearMessageHistory()
+            rxTimer = New System.Windows.Forms.Timer()
+            rxTimer.Interval = 50
+            rxTimer.Start()
+            openButton.Text = "Close"
+            rxIdEdit.Enabled = False
+            rxMaskEdit.Enabled = False
+            rxExtendedCheck.Enabled = False
+            rxStandardCheck.Enabled = False
+            rxDataMaskEdit.Enabled = False
+            modeCombo.Enabled = False
+            tresCheck.Enabled = False
+            nominalBitrateEdit.Enabled = False
+            dataBitrateEdit.Enabled = False
+            samplePosSpin.Enabled = False
+            enumerateButton.Enabled = False
+            txButton.Enabled = True
+            channelComboBox.Enabled = False
+        End If
     End Sub
 
+    Private Sub StopTransmission()
+        If txTimer IsNot Nothing Then
+            txTimer.Stop()
+            txTimer.Dispose()
+            txTimer = Nothing
+        End If
+        pendingTxMsgCount = 0
+        txButton.Text = "Transmit"
+    End Sub
 
-    Private Function rxAdvancedFilterCheck_CheckedChanged()
+    Private Sub CloseOpenedChannels()
+        Dim isWindowsXp As Boolean = IsWindowsXpOrEarlier()
+        Dim hadOpenedHandle As Boolean = False
+        For i As Integer = 0 To channelHandles.Length - 1
+            If channelHandles(i) <> IntPtr.Zero Then
+                hadOpenedHandle = True
+                Exit For
+            End If
+        Next
+        Dim waitForXpUsbRelease As Boolean = isWindowsXp AndAlso hadOpenedHandle
+        StopTransmission()
+        If rxTimer IsNot Nothing Then
+            rxTimer.Stop()
+            rxTimer.Dispose()
+            rxTimer = Nothing
+        End If
+
+        If isWindowsXp Then
+            For i As Integer = 0 To channelHandles.Length - 1
+                If channelHandles(i) <> IntPtr.Zero Then
+                    BMAPI.BM_ClearBuffer(channelHandles(i))
+                End If
+            Next
+            For i As Integer = 0 To channelHandles.Length - 1
+                If channelHandles(i) <> IntPtr.Zero Then
+                    BMAPI.BM_SetCanMode(channelHandles(i), BM_CanModeTypeDef.BM_CAN_OFF_MODE)
+                End If
+            Next
+        End If
+
+        For i As Integer = 0 To channelHandles.Length - 1
+            If channelHandles(i) <> IntPtr.Zero Then
+                BMAPI.BM_Close(channelHandles(i))
+                channelHandles(i) = IntPtr.Zero
+            End If
+        Next
+        If waitForXpUsbRelease Then
+            System.Threading.Thread.Sleep(XpUsbCloseSettleMilliseconds)
+        End If
+
+        openedChannelCount = 0
+        sendComboBox.Items.Clear()
+        sendComboBox.Text = ""
+        openButton.Text = "Open"
+        rxIdEdit.Enabled = True
+        rxMaskEdit.Enabled = True
+        rxExtendedCheck.Enabled = True
+        rxStandardCheck.Enabled = True
         rxDataMaskEdit.Enabled = rxAdvancedFilterCheck.Checked
-        Return vbNull
+        modeCombo.Enabled = True
+        tresCheck.Enabled = True
+        nominalBitrateEdit.Enabled = True
+        dataBitrateEdit.Enabled = True
+        samplePosSpin.Enabled = True
+        enumerateButton.Enabled = True
+        txButton.Enabled = False
+        channelComboBox.Enabled = True
+    End Sub
+
+    Private Function TryGetUnavailableOpenedChannel(
+        ByRef channelNumber As Integer,
+        ByRef failureStatus As BM_StatusTypeDef) As Boolean
+
+        channelNumber = 0
+        failureStatus = BM_StatusTypeDef.BM_ERROR_OK
+        For i As Integer = 0 To openedChannelCount - 1
+            If channelHandles(i) = IntPtr.Zero Then
+                Continue For
+            End If
+
+            Dim statusInfo As New BM_CanStatusInfoTypedef()
+            Dim status As BM_StatusTypeDef = BMAPI.BM_GetStatus(channelHandles(i), statusInfo)
+            If IsChannelLossStatus(status) Then
+                channelNumber = i + 1
+                failureStatus = status
+                Return True
+            End If
+        Next
+        Return False
     End Function
+
+
+    Private Sub rxAdvancedFilterCheck_CheckedChanged(
+        sender As Object,
+        e As EventArgs) Handles rxAdvancedFilterCheck.CheckedChanged
+
+        rxDataMaskEdit.Enabled = rxAdvancedFilterCheck.Checked
+    End Sub
+
     Private Sub enumerateButton_Click(sender As Object, e As EventArgs) Handles enumerateButton.Click
         enumerate()
     End Sub
 
-    Private Function txButton_Click() Handles txButton.Click
-        Dim success As Boolean = False
-        Dim isTransmit As Boolean = False
-        If txButton.Text = "Transmit" Then
-            isTransmit = True
-        End If
-        Dim channelIndex As Integer
-        channelIndex = sendComboBox.SelectedIndex
-        If (channelHandles(channelIndex) = IntPtr.Zero) Then
-            Return False
-        End If
-        If (isTransmit And channelIndex >= 0) Then
-            Dim id As Integer = Convert.ToUInt32(txIdEdit.Text, 16)
-            Dim length As Integer = Convert.ToUInt32(txLengthEdit.Text)
-            Dim dlc As Integer = txMsgBuf.lengthToDLc(length)
-            Dim DlcToDataBytes() As Integer = New Integer(15) {0, 1, 2, 3,
-                                                           4, 5, 6, 7,
-                                                           8, 12, 16, 20,
-                                                           24, 32, 48, 64}
-            Dim dlcToLength As Integer = DlcToDataBytes(dlc)
-            If Not (length = dlcToLength) Then
-                System.Windows.Forms.MessageBox.Show("According to ISO standard, CANFD message payload length could only be 0-8,12,16,20,24,32,48 or 64.", "Warning")
-            End If
-
-            txMsgBuf = New BM_CanMessageTypeDef()
-            txMsgBuf.BM_CanMessageTypeDef(id, dlc, txExtendedCheck.Checked, False, txFdCheck.Checked, txFdCheck.Checked, False)
-            Dim payload As String = txDataEdit.Text.Replace(" ", "")
-            Dim j As Integer = 0
-            While (j * 2 + 2 <= payload.Length)
-                txMsgBuf.payload(j) = Convert.ToByte(payload.Substring(j * 2, 2), 16)
-                j = j + 1
-            End While
-            success = True
+    Private Sub txButton_Click(sender As Object, e As EventArgs) Handles txButton.Click
+        Dim isTransmit As Boolean = txButton.Text = "Transmit"
+        If Not isTransmit Then
+            StopTransmission()
+            Return
         End If
 
-        If (isTransmit And success) Then
-            pendingTxMsgCount = Convert.ToUInt32(txCountEdit.Text)
-            Dim cycle As Integer = Convert.ToInt32(txCycleEdit.Text)
-            txTimer = New System.Windows.Forms.Timer()
-            txTimer.Interval = cycle
-            txTimer.Start()
-            txButton.Text = "Stop"
-            writePendingMessages()
-        Else
-            If (txTimer.Enabled) Then
-                txTimer.Stop()
-                pendingTxMsgCount = 0
-                txButton.Text = "Transmit"
-            End If
+        Dim channelIndex As Integer = sendComboBox.SelectedIndex
+        If channelIndex < 0 OrElse channelHandles(channelIndex) = IntPtr.Zero Then
+            ShowInputError("Select an open channel before transmitting.")
+            Return
         End If
-        Return vbNull
-    End Function
+
+        Dim message As New BM_CanMessageTypeDef()
+        Dim count As UInteger
+        Dim cycle As Integer
+        If Not TryBuildTransmitMessage(message, count, cycle) Then
+            Return
+        End If
+
+        txMsgBuf = message
+        pendingTxMsgCount = count
+        txTimer = New System.Windows.Forms.Timer()
+        txTimer.Interval = cycle
+        txTimer.Start()
+        txButton.Text = "Stop"
+        writePendingMessages()
+    End Sub
 
     Public Shared Function GetUtcTimestamp(msgLen As UInteger, canMsg As BM_CanMessageTypeDef) As ULong
         Dim tailPtr As IntPtr = IntPtr.Zero
@@ -344,7 +616,7 @@ Partial Public Class MainForm
         Try
             tailPtr = Marshal.AllocHGlobal(Marshal.SizeOf(GetType(BM_DataTailTypeDef)))
 
-            Dim structSize As Integer = Marshal.SizeOf(Of BM_CanMessageTypeDef)()
+            Dim structSize As Integer = Marshal.SizeOf(GetType(BM_CanMessageTypeDef))
             bufferPtr = Marshal.AllocHGlobal(structSize)
             Marshal.StructureToPtr(canMsg, bufferPtr, False)
 
@@ -368,55 +640,153 @@ Partial Public Class MainForm
             End If
         End Try
     End Function
-    Private Function readPendingMessages()
+    Private Sub readPendingMessages()
+        If openedChannelCount = 0 Then
+            Return
+        End If
+
+        Dim batch As New List(Of ReceivedMessage)()
+        Dim channelPending As UInteger
+        If openedChannelCount >= 32 Then
+            channelPending = UInteger.MaxValue
+        Else
+            channelPending = (1UI << openedChannelCount) - 1UI
+        End If
+        Dim maxMessagesThisTick As Integer = If(
+            IsWindowsXpOrEarlier(),
+            MaxXpMessagesPerTimerTick,
+            Integer.MaxValue)
         Dim msg As New BM_DataTypeDef()
-        For i As Integer = 0 To openedChannelCount - 1
-            If (channelHandles(i)) Then
-                Dim timestamp As Integer = 0
-                While BMAPI.BM_Read(Me.channelHandles(i), msg) = BM_StatusTypeDef.BM_ERROR_OK
-                    Me.rxMsgBuf = msg.can
-                    timestamp = msg.timestamp
-                    Dim msgLen As UInteger = msg.can.GetLength()
+
+        While channelPending <> 0 AndAlso batch.Count < maxMessagesThisTick
+            For channelOffset As Integer = 0 To openedChannelCount - 1
+                If batch.Count >= maxMessagesThisTick Then
+                    Exit For
+                End If
+                Dim channelBit As UInteger = 1UI << channelOffset
+                If (channelPending And channelBit) = 0 Then
+                    Continue For
+                End If
+
+                If channelHandles(channelOffset) = IntPtr.Zero Then
+                    channelPending = channelPending And Not channelBit
+                    Continue For
+                End If
+
+                Dim status As BM_StatusTypeDef = BMAPI.BM_Read(Me.channelHandles(channelOffset), msg)
+                If status = BM_StatusTypeDef.BM_ERROR_OK Then
                     Dim utcts As ULong = 0
-                    If BMAPI.BM_GetDataPtpTimestamp(Me.channelHandles(i), msg, utcts) <> BM_StatusTypeDef.BM_ERROR_OK Then
+                    If BMAPI.BM_GetDataPtpTimestamp(Me.channelHandles(channelOffset), msg, utcts) <> BM_StatusTypeDef.BM_ERROR_OK Then
                         'If failed to extract a PTP timestamp from data, use current time on host-machine.
                         utcts = BMAPI.BM_GetHostPtpTime()
                     End If
-                    Dim istx As Boolean = msg.header.IsAckData()
-                    DisplayMessage(i + 1, Me.rxMsgBuf, timestamp, utcts, istx)
-                End While
-            End If
 
-        Next
-        Return vbNull
-    End Function
-
-    Private Function writePendingMessages()
-        Dim channelIndex As Integer = sendComboBox.SelectedIndex
-        If channelIndex = -1 Then
-            Return False
-        End If
-        If (channelHandles(channelIndex) = IntPtr.Zero) Then
-            Return False
-        End If
-        If (channelIndex >= 0) Then
-            If (pendingTxMsgCount > 0) Then
-                Dim timestamp As Integer = 0
-                Dim port As Integer = 0
-                Dim ns As ULong = 0
-                BMAPI.BM_GetPtpTime(channelHandles(channelIndex), ns)
-                Dim status As BM_StatusTypeDef = BMAPI.BM_WriteCanMessage(channelHandles(channelIndex), txMsgBuf, port, 0, timestamp)
-                If (status = BM_StatusTypeDef.BM_ERROR_OK) Then
-                    pendingTxMsgCount = pendingTxMsgCount - 1
-                    If (pendingTxMsgCount <= 0) Then
-                        txButton_Click()
+                    Dim canCopy As BM_CanMessageTypeDef = msg.can
+                    If msg.can.payload IsNot Nothing Then
+                        canCopy.payload = DirectCast(msg.can.payload.Clone(), Byte())
                     End If
+
+                    batch.Add(New ReceivedMessage With {
+                        .Channel = channelOffset + 1,
+                        .CanMessage = canCopy,
+                        .Timestamp = msg.timestamp,
+                        .UtcTimestamp = utcts,
+                        .IsTx = msg.header.IsAckData()
+                    })
+                ElseIf status = BM_StatusTypeDef.BM_ERROR_QRCVEMPTY Then
+                    channelPending = channelPending And Not channelBit
+                Else
+                    channelPending = channelPending And Not channelBit
+                    Console.Error.WriteLine(
+                        "BM_Read failed on channel {0}: {1}",
+                        channelOffset + 1,
+                        status)
+                    If IsChannelLossStatus(status) Then
+                        AppendMessageBatch(batch)
+                        CloseOpenedChannels()
+                        MessageBox.Show(
+                            Me,
+                            "Channel " & (channelOffset + 1).ToString() &
+                                " is no longer available (" & status.ToString() &
+                                "). Re-enumerate the device and open it again.",
+                            "Channel disconnected",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning)
+                        Return
+                    End If
+                End If
+            Next
+        End While
+
+        AppendMessageBatch(batch)
+    End Sub
+
+    Private Sub ClearMessageHistory()
+        messageHistory.Clear()
+        msgListView.VirtualListSize = 0
+        msgListView.Invalidate()
+    End Sub
+
+    Private Sub AppendMessageBatch(batch As IList(Of ReceivedMessage))
+        If batch.Count = 0 Then
+            Return
+        End If
+
+        Dim firstIncoming As Integer = Math.Max(0, batch.Count - MaxDisplayedMessages)
+        Dim incomingCount As Integer = batch.Count - firstIncoming
+        Dim removeCount As Integer = Math.Max(
+            0,
+            messageHistory.Count + incomingCount - MaxDisplayedMessages)
+        If removeCount > 0 Then
+            messageHistory.RemoveRange(0, removeCount)
+        End If
+
+        For i As Integer = firstIncoming To batch.Count - 1
+            messageHistory.Add(batch(i))
+        Next
+
+        msgListView.VirtualListSize = messageHistory.Count
+        msgListView.Invalidate()
+        msgListView.EnsureVisible(messageHistory.Count - 1)
+    End Sub
+
+    Private Sub writePendingMessages()
+        Dim channelIndex As Integer = sendComboBox.SelectedIndex
+        If channelIndex < 0 OrElse channelHandles(channelIndex) = IntPtr.Zero Then
+            Return
+        End If
+
+        If pendingTxMsgCount > 0 Then
+            Dim timestamp As UInteger = 0
+            Dim port As UInteger = 0
+            Dim status As BM_StatusTypeDef = BMAPI.BM_WriteCanMessage(
+                channelHandles(channelIndex),
+                txMsgBuf,
+                port,
+                0,
+                timestamp)
+            If status = BM_StatusTypeDef.BM_ERROR_OK Then
+                pendingTxMsgCount -= 1UI
+                If pendingTxMsgCount = 0 Then
+                    StopTransmission()
+                End If
+            Else
+                StopTransmission()
+                If IsChannelLossStatus(status) Then
+                    CloseOpenedChannels()
+                    MessageBox.Show(
+                        Me,
+                        "The transmit channel is no longer available (" & status.ToString() &
+                            "). Re-enumerate the device and open it again.",
+                        "Channel disconnected",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning)
+                Else
+                    MessageBox.Show(Me, "Failed to transmit message: " & status.ToString(), "Transmit failed")
                 End If
             End If
         End If
-
-        Return vbNull
-    End Function
+    End Sub
 
     Public Shared Sub TimevalToFormattedString(utcTimestamp As ULong, str As StringBuilder, capacity As Integer)
         Dim seconds As Long = CLng(utcTimestamp \ 1000000000)
@@ -442,59 +812,93 @@ Partial Public Class MainForm
         str.Append(formatted)
         str.Append(microseconds.ToString("D6"))
     End Sub
-    Private Function DisplayMessage(i As Integer, canMsg As BM_CanMessageTypeDef, timestamp As Integer, utcts As ULong, tx As Boolean)
+    Private Sub msgListView_RetrieveVirtualItem(
+        sender As Object,
+        e As RetrieveVirtualItemEventArgs)
+
+        If e.ItemIndex < 0 OrElse e.ItemIndex >= messageHistory.Count Then
+            e.Item = New ListViewItem()
+            Return
+        End If
+
+        e.Item = CreateMessageItem(messageHistory(e.ItemIndex))
+    End Sub
+
+    Private Shared Function CreateMessageItem(received As ReceivedMessage) As ListViewItem
         Dim item As System.Windows.Forms.ListViewItem = New System.Windows.Forms.ListViewItem()
         Dim str As New StringBuilder(32)
 
 
-        item.Text = Convert.ToString(timestamp * 0.000001F)
-        If utcts > 0 Then
-            TimevalToFormattedString(utcts, str, 32)
+        item.Text = Convert.ToString(received.Timestamp * 0.000001F)
+        If received.UtcTimestamp > 0 Then
+            TimevalToFormattedString(received.UtcTimestamp, str, 32)
         Else
             str.Clear()
             str.Append("N/A")
         End If
         item.SubItems.Add(Convert.ToString(str))
 
-        If tx Then
+        If received.IsTx Then
             item.SubItems.Add("TX")
         Else
             item.SubItems.Add("RX")
         End If
 
-        item.SubItems.Add(Convert.ToString(i))
-        item.SubItems.Add(Convert.ToString(canMsg.GetID(), 16).ToUpper())
-        item.SubItems.Add(canMsg.GetTypeString())
-        item.SubItems.Add(Convert.ToString(canMsg.GetLength()))
-        item.SubItems.Add(canMsg.GetPayloadString())
-        msgListView.Items.Add(item)
-        msgListView.Items(msgListView.Items.Count - 1).EnsureVisible()
-        Return vbNull
+        item.SubItems.Add(Convert.ToString(received.Channel))
+        item.SubItems.Add(Convert.ToString(received.CanMessage.GetID(), 16).ToUpper())
+        item.SubItems.Add(received.CanMessage.GetTypeString())
+        item.SubItems.Add(Convert.ToString(received.CanMessage.GetLength()))
+        item.SubItems.Add(received.CanMessage.GetPayloadString())
+        Return item
     End Function
 
-    'Protected Function WndProc(m As System.Windows.Forms.Message)
-    '    Const WM_DEVICECHANGE As Integer = &H219
-    '    Try
-    '        If (m.Msg = WM_DEVICECHANGE) Then
-    '            If (openButton.Text = "Open") Then
-    '                enumerate()
-    '            End If
+    Protected Overrides Sub OnFormClosing(e As FormClosingEventArgs)
+        CloseOpenedChannels()
+        BMAPI.BM_UnInit()
+        MyBase.OnFormClosing(e)
+    End Sub
 
-    '        End If
-
-
-    '    Catch
-    '        Dim ex As Exception = New Exception
-    '        System.Windows.Forms.MessageBox.Show(ex.Message)
-    '    End Try
-    '    WndProc(m)
-    '    Return vbNull
-    'End Function
+    Protected Overrides Sub WndProc(ByRef message As Message)
+        Const WM_DEVICECHANGE As Integer = &H219
+        Try
+            If message.Msg = WM_DEVICECHANGE Then
+                If openButton.Text = "Open" Then
+                    enumerate()
+                Else
+                    Dim channelNumber As Integer
+                    Dim failureStatus As BM_StatusTypeDef
+                    If TryGetUnavailableOpenedChannel(channelNumber, failureStatus) Then
+                        CloseOpenedChannels()
+                        MessageBox.Show(
+                            Me,
+                            "Channel " & channelNumber.ToString() &
+                                " is no longer available (" & failureStatus.ToString() &
+                                "). Re-enumerate the device and open it again.",
+                            "Channel disconnected",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning)
+                    End If
+                End If
+            End If
+        Catch ex As Exception
+            MessageBox.Show(ex.Message)
+        End Try
+        MyBase.WndProc(message)
+    End Sub
 
 
     ' See for details https//www.shuzhiduo.com/A/1O5EZB2Gd7/
     Private Sub channelComboBox_ItemClick(sender As Object, e As System.Windows.Forms.ItemCheckEventArgs) Handles channelComboBox.ItemClick
-        channelSelected(e.Index) = Not channelSelected(e.Index)
+        If e.Index >= 0 AndAlso e.Index < nchannels AndAlso e.Index < channelSelected.Length Then
+            Dim isChecked As Boolean = e.NewValue = CheckState.Checked
+            channelSelected(e.Index) = isChecked
+            Dim channelName As String = channelinfos(e.Index).GetName()
+            If isChecked Then
+                selectedChannelNames.Add(channelName)
+            Else
+                selectedChannelNames.Remove(channelName)
+            End If
+        End If
     End Sub
 
 

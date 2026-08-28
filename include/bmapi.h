@@ -2,7 +2,7 @@
  * @file        bmapi.h
  * @brief       Busmust device communication API.
  * @author      busmust
- * @version     1.13.7.40
+ * @version     1.14.2.43
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -23,7 +23,7 @@ extern "C" {
  * @brief API version, format: major.minor.revision.build
  * @note  This macro might be checked by the application so that it could adapt to different versions of BMAPI.
  */
-#define BM_API_VERSION         0x010D0728
+#define BM_API_VERSION         0x010E022B
 
  /**
 * @def   BMAPI_REMOTE_API_AVAILABLE
@@ -64,6 +64,9 @@ typedef void* BM_ChannelHandle;
  */
 typedef void* BM_DeviceHandle;
 
+/** Explicit control lock for one remote BMAPI endpoint. */
+typedef void* BM_RemoteSessionHandle;
+
 /**
  * @typedef BM_NotificationHandle
  * @brief   Abstract handle to notification event of opened Busmust device channel, 
@@ -78,8 +81,9 @@ typedef void* BM_NotificationHandle;
  * @param[in] tres         The terminal resistor option value which has passed or failed.
  * @param[in] nrxmessages  Number of received messages while listening to the bus using bitrate and tres.
  * @param[in] userarg      Arbitrary user argument passed by BM_Autoset().
+ * @return  Return 0 to continue AUTOSET sequence, return non-zero value to cancel AUTOSET sequence.
  */
-typedef void (*BM_AutosetCallbackHandle)(const BM_BitrateTypeDef* bitrate, BM_TerminalResistorTypeDef tres, int nrxmessages, uintptr_t userarg);
+typedef uint32_t (*BM_AutosetCallbackHandle)(const BM_BitrateTypeDef* bitrate, BM_TerminalResistorTypeDef tres, int nrxmessages, uintptr_t userarg);
 
 /**
  * @brief  Initialize BMAPI library, this function shall be called before any other API calls and shall only be called once.
@@ -126,6 +130,21 @@ BMAPI BM_StatusTypeDef BM_EnumerateByCap(BM_ChannelInfoTypeDef channelinfos[], i
  * @return       Operation status, see BM_StatusTypeDef for details.
  */
 BMAPI BM_StatusTypeDef BM_EnumerateRemote(BM_ChannelInfoTypeDef channelinfos[], int* nchannels, uint8_t ipv4[4], int timeout);
+
+/** Query remote control-lock support and the current owner without claiming.
+ *  The explicit timeout controls only this request and has no lease effect. */
+BMAPI BM_StatusTypeDef BM_QueryRemoteSession(const uint8_t ipv4[4], int timeout_ms, BM_RemoteSessionInfoTypeDef* info);
+
+/** Claim the remote control session and start automatic heartbeats.
+ *  This never falls back to unlocked mode. The handle must be released. */
+BMAPI BM_StatusTypeDef BM_ClaimRemoteSession(BM_RemoteSessionHandle* session, const uint8_t ipv4[4], const BM_RemoteSessionConfigTypeDef* config, BM_RemoteSessionInfoTypeDef* info);
+
+/** Query live status for a claimed session. */
+BMAPI BM_StatusTypeDef BM_GetRemoteSessionInfo(BM_RemoteSessionHandle session, BM_RemoteSessionInfoTypeDef* info);
+
+/** Release the remote control session and destroy the handle.
+ *  BM_UnInit also performs best-effort release of outstanding handles. */
+BMAPI BM_StatusTypeDef BM_ReleaseRemoteSession(BM_RemoteSessionHandle session);
 #endif
 
 /**
@@ -140,6 +159,24 @@ BMAPI BM_StatusTypeDef BM_Autoset(
     BM_ChannelInfoTypeDef* channelinfo,
     BM_BitrateTypeDef* bitrate,
     BM_TerminalResistorTypeDef* tres,
+    BM_AutosetCallbackHandle callback,
+    uintptr_t userarg
+);
+
+/**
+ * @brief Start AUTOSET sequence with explicit passive-listen or active-detect strategy.
+ * @param[in]  channelinfo  Info of the device channel to run AUTOSET on, usually the info is filled by BM_Enumerate().
+ * @param[out] bitrate      The detected bitrate.
+ * @param[out] tres         The detected terminal resistor.
+ * @param[in]  config       AUTOSET configuration. When NULL, passive listen defaults are used.
+ * @param[in]  callback     A callback function which will be called on each step of AUTOSET.
+ * @param[in]  userarg      Arbitrary user argument of the callback function, this argument will be passed to the callback as is.
+ */
+BMAPI BM_StatusTypeDef BM_AutosetEx(
+    BM_ChannelInfoTypeDef* channelinfo,
+    BM_BitrateTypeDef* bitrate,
+    BM_TerminalResistorTypeDef* tres,
+    const BM_AutosetConfigTypeDef* config,
     BM_AutosetCallbackHandle callback,
     uintptr_t userarg
 );
@@ -171,6 +208,10 @@ BMAPI BM_ChannelHandle BM_OpenRemote(uint8_t ipv4[4], const BM_ChannelInfoTypeDe
  * @param[in]  rxfilter    CAN acceptance filters option of the opened channel, see BM_RxFilterTypeDef for details.
  * @param[in]  nrxfilters  Number of acceptance filters, usually there could be up to 2 filters.
  * @return Operation status, see BM_StatusTypeDef for details.
+ * @note For a claimed remote channel, BM_ERROR_NETINUSE may be returned with a
+ *       non-NULL handle. The requested configuration was not applied; the
+ *       handle remains valid only for shared BM_Read/BM_Write/status access
+ *       and must still be closed by the caller.
  */
 BMAPI BM_StatusTypeDef BM_OpenEx(
         BM_ChannelHandle* handle,
@@ -234,8 +275,9 @@ BMAPI BM_StatusTypeDef BM_ClearBuffer(BM_ChannelHandle handle);
 
 /**
  * @brief      Recover from CAN BUSOFF state.
- *             For firmware V3.x+, sends USB command to reset MCAN controller.
- *             For older firmware, falls back to loopback + dummy message recovery.
+ *             Gen2/Gen2.5 firmware 2.6.0.0+ and Gen3 firmware 3.1.0.0+ use
+ *             firmware-side recovery. Gen2/Gen2.5 firmware below 2.6.0.0 and
+ *             Gen3 firmware 3.0.x use loopback + dummy message recovery.
  * @param[in]  handle  Handle to the channel to recover.
  * @return    Operation status, see BM_StatusTypeDef for details.
  */

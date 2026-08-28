@@ -26,7 +26,7 @@ Partial Class MainForm
         Me.Label15 = New System.Windows.Forms.Label()
         Me.hostComboBox = New System.Windows.Forms.ComboBox()
         Me.label1 = New System.Windows.Forms.Label()
-        Me.channelComboBox = New ComboBoxCustomer.ComCheckBoxList()
+        Me.channelComboBox = New ComCheckBoxList()
         Me.tresCheck = New System.Windows.Forms.CheckBox()
         Me.label2 = New System.Windows.Forms.Label()
         Me.modeCombo = New System.Windows.Forms.ComboBox()
@@ -623,7 +623,7 @@ Partial Class MainForm
 
     Private WithEvents flowLayoutPanel1 As Windows.Forms.FlowLayoutPanel
     Private WithEvents label1 As Windows.Forms.Label
-    Private WithEvents channelComboBox As ComboBoxCustomer.ComCheckBoxList
+    Private WithEvents channelComboBox As ComCheckBoxList
     Private WithEvents tresCheck As Windows.Forms.CheckBox
     Private WithEvents label2 As Windows.Forms.Label
     Private WithEvents modeCombo As Windows.Forms.ComboBox

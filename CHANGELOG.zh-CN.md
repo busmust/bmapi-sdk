@@ -1,17 +1,51 @@
 # 更新日志
 
+## 1.14.2.43 [2026-08-28]
+
+1. 优化多设备、多通道 CAN/CAN FD 发送调度，避免繁忙或暂时阻塞的通道影响其他通道。
+2. 完善设备打开、关闭和热插拔恢复事务，失败时完整回滚资源和通道状态，避免产生不可用的半连接句柄。
+3. 提升并发写入、批量发送和周期发送过程中的队列一致性，修复竞争条件可能导致的发送异常。
+4. 修复远程通道启用后发送线程未及时唤醒的问题，缩短远程连接建立后的首次发送等待时间。
+5. 加强设备重连后的能力重新探测及多句柄恢复，避免沿用断线前的过期设备能力。
+6. 完善 Windows XP 与 .NET 4.0 兼容性，并提升 C#、VB.NET 和 Qt 多通道例程在持续高流量下的接收、重开和退出稳定性。
+
+## 1.14.1.42 [2026-08-14]
+
+1. 修复异步 CAN/CAN FD 写入在 USB bulk 部分传输时的静默丢帧：从精确字节偏移继续提交，并仅在整批数据完整提交后释放主机 TX 队列，从而正确支持设备背压。
+
+## 1.14.0.42 [2026-07-27]
+
+1. 重构 C#、VB.NET 和 Qt CAN Analyzer 例程的多通道接收与显示流程：轮询全部通道直至每个通道返回 `BM_ERROR_QRCVEMPTY`、批量刷新界面并将显示历史限制为 5000 条，提升持续高流量下的接收完整性与界面响应性。
+2. 新增面向 GWR/BMAPI 多客户端控制仲裁的公开远程控制会话 API：`BM_QueryRemoteSession`、`BM_ClaimRemoteSession`、`BM_GetRemoteSessionInfo` 和 `BM_ReleaseRemoteSession`，其带版本号的 ABI 支持能力与结果状态查询、受保护控制操作的独占所有权、自动心跳续约和超时清理，同时普通数据收发仍保持共享。
+3. 完成 Windows 平台 `BM_AutosetEx` 运行库导出及导入库对齐，确保公开头文件与发布二进制提供一致的 API。
+4. 修复 BMAPI 默认接收缓冲区初始化失败时清理过程崩溃的问题。
+5. 完善 Windows XP 与 .NET 4.0 兼容路径：BMAPI 运行库在 XP 上采用非阻塞 USB 事件轮询以避免同步 Open/Close 控制 I/O 卡顿，C# 例程在 XP 上跳过不受支持的 PTP 同步并加强通道打开失败后的资源清理。
+6. 修复 `multichannel_rx_cpp` 和 `multichannel_logger` 在起始通道编号不为 0 时清除错误 pending 位的问题，并修正多通道 PTP 同步数量，避免接收循环无法正确结束或遗漏同步通道。
+
+## 1.13.10.41 [2026-07-10]
+
+1. 新增 `BM_AutosetEx`，支持显式选择被动监听和主动探测策略，同时保持现有 `BM_Autoset` 函数签名及行为不变。
+2. 将 `BM_AutosetCallbackHandle` ABI 返回类型更新为 `uint32_t`（返回 0 表示继续，非 0 表示取消），并新增可配置的确认次数、监听/发送超时、探测报文及常见 CAN/CAN FD 波特率组合探索。
+3. 同步更新 C/C++、LabVIEW、C#、VB.NET、python-can 和 python-lin 绑定中的 AutoSet 声明。
+4. 按固件能力调整 `BM_RecoverBusOff` 路径：二代/二代半固件 2.6.0.0+ 与三代固件 3.1.0.0+ 使用固件侧恢复；更早的二代/二代半固件及三代 3.0.x 保留主机侧兼容方案。
+
+## 1.13.8.41 [2026-06-30]
+
+1. 新增 LIN header-only SYNC_BREAK 支持：应用程序可通过 `BM_LIN_MESSAGE_FLAGS_SYNC_BREAK` / `BM_LinMessageCtrlTypeDef.SYNC_BREAK` 主动发送 LIN header only（break + sync + PID，不发送 data/checksum）。TEF/RX 报文通过 `BM_LinMessageCtrlTypeDef.SYNC_BREAK` 标记该 header-only 操作。该字段复用原未使用的 `ID_PARITY` bit。
+2. C# 例程（`can_analyzer_csharp`）兼容性提升：用内置 `ComCheckBoxList` 实现替换第三方 `ComboBoxCustomer.dll`，例程可在 Windows XP 与 .NET 4.0 环境运行。
+
 ## 1.13.7.40 [2026-06-21]
 
 1. 修复背景 CAN/CAN FD 流量下 ISO-TP 超时处理问题，提升诊断通信中软件 ISO-TP 的稳定性。
 2. 修复 BMAPI Python 绑定中 TX task 结构体以及 python-can、udsoncan 使用的 ISO-TP 收发路径兼容性问题。
 
-## 1.13.6.40 [2025-05-15]
+## 1.13.6.40 [2026-05-15]
 
 1. 新增 `BM_RecoverBusOff` 接口，主动恢复 Bus-off 状态，避免周期性轮询对其他通道发送周期的影响；增加 `BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY` 模式标志，允许用户禁用自动恢复
 2. 新增 `BM_HardwareLastMsgStat` 接口，获取硬件最新发送报文状态
 3. Python LIN 库去除 python-can 依赖，补充 aenum 模块，新增 `store_task=False` 硬件发送任务 demo
 
-## 1.13.5.39 [2025-01-23]
+## 1.13.5.39 [2026-01-23]
 
 1. 从本版本开始使用 CICD 全自动构建，将在四位版本号（例如 1.13.5.39）基础上追加第五位版本号代表构建号（Build Number）
 2. 修复 CANFD 协议（而不是 CAN2.0）下，`BM_WriteIsotp` 在报文负载长度小于 DLC 可承载长度时，发送的报文不符合 ISOTP 约定的问题
@@ -19,7 +53,7 @@
 4. 整理 SDK 文件夹内容，规范化命名，优化一些启动脚本等，如有困扰欢迎联系技术支持
 5. 修复 Python 环境下使用 32 位时间戳意外翻转的问题，现在时间戳获取完全依赖 BMAPI.DLL
 
-## 1.13.3.38 [2024-12-30]
+## 1.13.3.38 [2025-12-30]
 
 1. **关键 BUGFIX！** 修复 2025 年 9 月新引入的，由于 BMAPI 基础库中的内存管理错误导致的长时间接收挂机自动停止，需要 Disconnect 再 Connect 才能恢复接收的问题
 2. `BM_CanfdMessageTypeDef` 的 `ctrl.tx` 成员新增 `ECHO` 属性，当置位此属性时，即使阻塞式调用 `BM_Write`，也可以额外收到一条 ACK 报文，用于回显

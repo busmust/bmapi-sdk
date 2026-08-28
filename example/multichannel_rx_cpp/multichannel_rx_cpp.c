@@ -248,8 +248,9 @@ int main(int argc, char* argv[])
         }
         BM_SetPtpMode(channels[channelid], BM_PTP_INPUT_USB_SOF);
     }
+    int nvalidchannels = lastchannelid - firstchannelid + 1;
     // Sync PTP timestamp for all devices
-    if (BM_SyncPtpTimes(&channels[firstchannelid], lastchannelid - firstchannelid) != BM_ERROR_OK)
+    if (BM_SyncPtpTimes(&channels[firstchannelid], nvalidchannels) != BM_ERROR_OK)
     {
         printf("Failed to sync PTP timestamps.\n");
     }
@@ -257,16 +258,15 @@ int main(int argc, char* argv[])
     usleep(TEST_STARTUP_TIMEOUT * 1000);
 
     /* Step4: Listen for notifications in parallel  */
-    int nvalidchannels = lastchannelid - firstchannelid + 1;
     printf("Channel [%d-%d] RX stats :\n\n\n\n", firstchannelid, lastchannelid);
     while ((notificationIndex = BM_WaitForNotifications(&notifications[firstchannelid], nvalidchannels, TEST_MSG_RX_TIMEOUT)) >= 0)
     {
         uint64_t channelpending = (1ULL << nvalidchannels) - 1ULL;
         while (channelpending)
         {
-            for (int notificationIndex = 0; notificationIndex < nvalidchannels; notificationIndex++)
+            for (int channelOffset = 0; channelOffset < nvalidchannels; channelOffset++)
             {
-                int sourcechannelid = firstchannelid + notificationIndex;
+                int sourcechannelid = firstchannelid + channelOffset;
                 BM_StatusTypeDef error = BM_ERROR_OK;
                 BM_DataTypeDef data;
 
@@ -293,7 +293,7 @@ int main(int argc, char* argv[])
                 else if (error == BM_ERROR_QRCVEMPTY)
                 {
                     /* BM_ERROR_QRCVEMPTY should not be considered as an error, otherwise report the error */
-                    channelpending &= ~(1ULL << sourcechannelid);
+                    channelpending &= ~(1ULL << channelOffset);
                     continue;
                 }
                 else

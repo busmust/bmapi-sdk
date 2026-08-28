@@ -28,7 +28,7 @@ public:
     QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override;
 
 public:
-    int insertMessage(const MsgDataTypeDef& msg);
+    int insertMessages(const QList<MsgDataTypeDef>& messages);
     void clearAllMessages();
 
 protected:
@@ -38,6 +38,7 @@ protected:
     QString msgPayload(const BM_DataTypeDef& msg) const;
 
 private:
+    enum { MaxMessageCount = 5000 };
     QList<MsgDataTypeDef> msgpool;
 
 };

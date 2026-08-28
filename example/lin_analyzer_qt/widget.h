@@ -13,18 +13,19 @@
 
 enum LIN_MSG_TYPE
 {
-    LIN_RECEIVE = 0,
-    LIN_MASTER_WRITE,
-    LIN_MASTER_READ,
-    LIN_SLAVE_WRITE,
+	LIN_RECEIVE = 0,
+	LIN_MASTER_WRITE,
+	LIN_MASTER_READ,
+	LIN_SLAVE_WRITE,
+	LIN_SYNC_BREAK,
 };
 
 typedef struct MsgTxtask
 {
-    BM_TxTaskTypeDef txTask;
-    int txTaskCount;
-    int channel;
-    int type;
+	BM_TxTaskTypeDef txTask;
+	int txTaskCount;
+	int channel;
+	int type;
 } MsgTxtaskTypeDef;
 
 QT_BEGIN_NAMESPACE
@@ -33,58 +34,60 @@ QT_END_NAMESPACE
 
 class Widget : public QWidget
 {
-    Q_OBJECT
+	Q_OBJECT
 
 public:
-    Widget(QWidget* parent = nullptr);
-    ~Widget();
-    int lengthToDlc(int length);
+	Widget(QWidget* parent = nullptr);
+	~Widget();
+	int lengthToDlc(int length);
+	void tryCountdownTxTask(int channelIndex, BM_LinMessageTypeDef* linMessage);
+	void flushTxTasks(int channelIndex, bool stop);
 
 protected:
-    void enumerate();
+	void enumerate();
 
-    void getAvailableHostIpList() const;
+	void getAvailableHostIpList() const;
 
 private slots:
-    void readPendingMessages(void);
+	void readPendingMessages(void);
 
-    void writePendingMessages(void);
+	void writePendingMessages(void);
 
-    void checksumChanged();
+	void checksumChanged();
 
-    void checktxLength();
+	void checktxLength();
 
-    void checktxCycle();
+	void checktxCycle();
 
-    void checktxCount();
+	void checktxCount();
 
-    void typeChanged(int index);
+	void typeChanged(int index);
 
-    void on_openButton_clicked(bool checked);
+	void on_openButton_clicked(bool checked);
 
-    void on_enumerateButton_clicked();
+	void on_enumerateButton_clicked();
 
-    void on_selectAllButton_clicked();
+	void on_selectAllButton_clicked();
 
-    void on_txButton_clicked(bool checked);
+	void on_txButton_clicked(bool checked);
 
-    void on_reverseButton_clicked();
+	void on_reverseButton_clicked();
 
-    void stopSendMsg();
+	void stopSendMsg();
 
 private:
-    Ui::Widget* ui;
+	Ui::Widget* ui;
 
 protected:
-    BM_ChannelHandle channels[32];
-    BM_ChannelInfoTypeDef channelinfos[32];
-    LinMsgTableModel* msgTableModel;
-    QTimer* rxTimer;
-    QList <MsgTxtask> txTaskMsgList[NCHANNEL];
-    int openedChannelCount;
-    QRegExpValidator* validator;
-    QVector<QLineEdit*> idLineEdits;
-    QString previousID[NTXTASK];
-    int msgIndex;
+	BM_ChannelHandle channels[32];
+	BM_ChannelInfoTypeDef channelinfos[32];
+	LinMsgTableModel* msgTableModel;
+	QTimer* rxTimer;
+	QList<MsgTxtask> txTaskMsgList[NCHANNEL];
+	int openedChannelCount;
+	QRegExpValidator* validator;
+	QVector<QLineEdit*> idLineEdits;
+	QString previousID[NTXTASK];
+	int msgIndex;
 };
 #endif // WIDGET_H

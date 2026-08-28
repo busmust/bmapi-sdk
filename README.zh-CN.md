@@ -99,6 +99,38 @@ BMAPI SDK 包含一系列运行时库和例程，支持应用程序通过 Busmus
 - **多线程**：`WriteXXX`/`ReadXXX` 支持多线程，但 `OpenEx` 和 `SetXXX` **不支持**
 - **BUSOFF 恢复**：参考 `bmapi_transmit_only` 例程中的 `recoverFromError()` 函数
 
+### 可选的远程控制会话锁
+
+GWR 远程 BMAPI 连接支持可选的控制会话锁，用于多客户端控制仲裁。该机制不改变
+`BM_EnumerateRemote`、`BM_OpenEx`、`BM_Read`、`BM_Write`、`BM_Close`、
+`BM_ChannelInfoTypeDef` 或既有能力位，旧客户端仍可按原方式兼容运行。
+
+需要确定性配置控制权的新客户端可按以下顺序使用：
+
+```c
+BM_RemoteSessionInfoTypeDef info = {0};
+BM_RemoteSessionConfigTypeDef config = {0};
+BM_RemoteSessionHandle session = NULL;
+
+info.size = sizeof(info);
+info.version = BM_REMOTE_SESSION_ABI_VERSION;
+BM_QueryRemoteSession(server_ipv4, 1500, &info);
+
+config.size = sizeof(config);
+config.version = BM_REMOTE_SESSION_ABI_VERSION;
+config.timeout_ms = BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS;
+config.heartbeat_interval_ms = BM_REMOTE_SESSION_DEFAULT_HEARTBEAT_MS;
+BM_ClaimRemoteSession(&session, server_ipv4, &config, &info);
+
+/* BM_OpenEx / BM_Set* / BM_Read / BM_Write / BM_Close */
+
+BM_ReleaseRemoteSession(session);
+```
+
+BMAPI 会自动发送心跳。申请失败时返回 `BM_ERROR_NETINUSE`，不会静默退回到无锁
+模式。普通报文发送和被动读取仍然共享，受保护的配置操作及持久任务则由会话独占。
+应用程序正常退出时应始终释放会话句柄；配置的超时机制负责异常退出后的恢复。
+
 ## Python 开发者
 
 配套 Python 开发包：
