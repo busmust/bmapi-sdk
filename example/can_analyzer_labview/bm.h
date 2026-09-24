@@ -153,7 +153,8 @@ typedef unsigned long long uintmax_t;
  * @def   BM_DATA_PAYLOAD_MAX_SIZE
  * @brief Size (in bytes) of BM Data payload, which contains a concrete message in CANFD|LIN|FLEXRAY|... type.
  */
-#define BM_DATA_PAYLOAD_MAX_SIZE (72U)
+#define BM_DATA_TAIL_SIZE (16U)
+#define BM_DATA_PAYLOAD_MAX_SIZE (72U + BM_DATA_TAIL_SIZE)
 
 /**
  * @def   BM_DATA_MAX_SIZE
@@ -594,7 +595,7 @@ typedef struct
  * @brief API version, format: major.minor.revision.build
  * @note  This macro might be checked by the application so that it could adapt to different versions of BMAPI.
  */
-#define BM_API_VERSION         0x1002  /* 1.0.0.2 */
+#define BM_API_VERSION         0x010E022D  /* 1.14.2.45 */
 
 /**
  * @def   BMAPI
@@ -896,6 +897,459 @@ BMAPI void BM_GetErrorText(BM_StatusTypeDef errorcode, char* buffer, int nbytes,
  * @param[in]  language   Reserved, only English is supported currently.
  */
 BMAPI void BM_GetDataText(BM_DataTypeDef* data, char* buffer, int nbytes, uint16_t language);
+
+
+/* ==== Types and APIs synchronized with BMAPI 1.14.2.45 ==== */
+
+typedef enum
+{
+    BM_LOG_NONE = 0,             /**< Show nothing on debug console */
+    BM_LOG_ERR,                  /**< Show only ERR level messages on debug console */
+    BM_LOG_WRN,                  /**< Show ERR and WRN level messages on debug console */
+    BM_LOG_INF,                  /**< Show ERR|WRN|INF level messages on debug console */
+    BM_LOG_DBG                   /**< Show all messages on debug console, including debug messages */
+} BM_LogLevelTypeDef;
+
+typedef enum
+{
+    BM_DEFAULT_BUFFER = 0x0000,                 /**< Default buffer: txq for write, rxq for read */
+    BM_LOGGINGFILE_BUFFER = 0x0001,             /**< Buffer for logging file operations */
+    BM_REPLAYFILE_BUFFER = 0x0002,              /**< Buffer for replay file operations */
+    BM_LOGGINGQ_BUFFER = 0x0111,                /**< Buffer for logging queue */
+    BM_REPLAYQ_BUFFER = 0x0222,                 /**< Buffer for replay queue */
+    BM_RXQ_BUFFER = 0x1111,                     /**< RX queue buffer (compatible with BM_ClearBuffer) */
+    BM_TXQ_BUFFER = 0x2222,                     /**< TX queue buffer (compatible with BM_ClearBuffer) */
+    BM_NO_BUFFER = 0xFFFF                       /**< No buffer: direct physical channel access for low latency */
+} BM_BufferId;
+
+typedef enum
+{
+    BM_WRITE_BUFFER = 0,                        /**< Write buffer */
+    BM_READ_BUFFER = 0x8000U                    /**< Read buffer */
+} BM_BufferTypeDef;
+
+typedef enum
+{
+    BM_WAKEUP = 0,                    /**< Channel is awake */
+    BM_SLEEP = 1,                     /**< Channel is sleeping */
+} BM_SleepStatusTypeDef;
+
+typedef enum
+{
+    BM_PTP_DISABLED = 0,                    /**< Disable PTP feature, work asynchronously using hardware local timestamp */
+    BM_PTP_INPUT_USB_SOF = 1,               /**< Use host computer's USB SOF packet to sync with host computer */
+    BM_PTP_INPUT_PPS = 2,                   /**< PTP slave: Use dedicated PPS input pin (if supported by hardware) as sync pulse input */
+    BM_PTP_OUTPUT_PPS = 4,                  /**< PTP master: Use dedicated PPS input pin (if supported by hardware) as sync pulse output */
+} BM_PtpModeTypeDef;
+
+typedef enum
+{
+    BM_LIN_OFF_MODE = 0x00,                     /**< The device is logically disconnected from LIN bus */
+    BM_LIN_SLAVE_MODE = 0x01,                   /**< The device is running as a slave node */
+    BM_LIN_INTERNAL_LOOPBACK_MODE = 0x02,       /**< The device is looping back messages internally */
+    BM_LIN_LISTEN_ONLY_MODE = 0x03,             /**< The device is receiving messages without impacting the LIN bus */
+    BM_LIN_MASTER_MODE = 0x08,                  /**< The device is running as a master node */
+} BM_LinModeTypeDef;
+
+typedef enum
+{
+    BM_LIN_VOLTAGE_12V_IN = 0,          /**< Accept 12V as input */
+    BM_LIN_VOLTAGE_12V_OUT,             /**< Use internal 12V DC-DC for pulling up */
+} BM_LinVoltageTypeDef;
+
+typedef enum
+{
+    BM_REMOTE_OWNER_NONE = 0,
+    BM_REMOTE_OWNER_LOCAL = 1,
+    BM_REMOTE_OWNER_REMOTE = 2
+} BM_RemoteOwnerTypeDef;
+
+typedef enum
+{
+    BM_REMOTE_SESSION_UNKNOWN = 0,
+    BM_REMOTE_SESSION_AVAILABLE = 1,
+    BM_REMOTE_SESSION_CLAIMED = 2,
+    BM_REMOTE_SESSION_EXPIRED = 3,
+    BM_REMOTE_SESSION_FAULTED = 4
+} BM_RemoteSessionStateTypeDef;
+
+typedef enum
+{
+    BM_REMOTE_SESSION_CAP_NONE = 0,
+    BM_REMOTE_SESSION_CAP_CLAIM = 1U << 0,
+    BM_REMOTE_SESSION_CAP_HEARTBEAT = 1U << 1,
+    BM_REMOTE_SESSION_CAP_CHANNEL_RELEASE = 1U << 2,
+    BM_REMOTE_SESSION_CAP_CONTROL_STATUS = 1U << 3,
+    BM_REMOTE_SESSION_CAP_TX_SEQ_TRANSLATION = 1U << 4
+} BM_RemoteSessionCapabilityTypeDef;
+
+typedef enum
+{
+    BM_REMOTE_SESSION_RESULT_OK = 0,
+    BM_REMOTE_SESSION_RESULT_UNSUPPORTED = 1,
+    BM_REMOTE_SESSION_RESULT_BUSY = 2,
+    BM_REMOTE_SESSION_RESULT_STALE = 3,
+    BM_REMOTE_SESSION_RESULT_DENIED = 4,
+    BM_REMOTE_SESSION_RESULT_INVALID = 5,
+    BM_REMOTE_SESSION_RESULT_INTERNAL = 6
+} BM_RemoteSessionResultTypeDef;
+
+#define BM_REMOTE_SESSION_ABI_VERSION 1U
+#define BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS 10000U
+#define BM_REMOTE_SESSION_DEFAULT_HEARTBEAT_MS 2000U
+#define BM_REMOTE_SESSION_MIN_TIMEOUT_MS 3000U
+#define BM_REMOTE_SESSION_MAX_TIMEOUT_MS 60000U
+
+/** Configuration used when claiming a remote control session. */
+typedef struct
+{
+    uint32_t size;                  /**< Set to sizeof(BM_RemoteSessionConfigTypeDef). */
+    uint32_t version;               /**< Set to BM_REMOTE_SESSION_ABI_VERSION. */
+    uint32_t timeout_ms;            /**< Control-lock lease, 0 for the 10000 ms default. */
+    uint32_t heartbeat_interval_ms; /**< 0 for the 2000 ms default; at most half the lease. */
+    uint32_t flags;                 /**< Must be zero in ABI version 1. */
+    char client_name[32];           /**< Optional UTF-8 display name; NUL terminated. */
+    uint8_t reserved[44];
+} BM_RemoteSessionConfigTypeDef;
+
+/** Status and ownership information for a remote control session. */
+typedef struct
+{
+    uint32_t size;
+    uint32_t version;
+    uint32_t capabilities;
+    uint32_t state;
+    uint32_t result;
+    uint32_t timeout_ms;
+    uint32_t expires_in_ms;
+    uint32_t config_generation;
+    uint8_t session_id[16];
+    uint8_t owner_ipv4[4];
+    uint8_t owner_kind;
+    uint8_t reserved0[3];
+    char owner_name[32];
+    uint8_t reserved[32];
+} BM_RemoteSessionInfoTypeDef;
+
+typedef void* BM_DeviceHandle;
+
+/** Explicit control lock for one remote BMAPI endpoint. */
+typedef void* BM_RemoteSessionHandle;
+
+/**
+ * @typedef BM_LinStatusInfoTypedef
+ * @brief   LIN channel status detailed information, retrieved by calling BM_GetLinStatus() or BM_GetStatus().
+ */
+typedef struct
+{
+    uint8_t ACTIVE;                               /**< The LIN channel is in ACTIVE state */
+    uint8_t SLEEP;                                /**< The LIN channel is in SLEEP state */
+    uint8_t ERRORS;                               /**< Error status bitmask for the LIN channel, see BM_LinErrorTypeDef for details */
+    uint8_t reserved[5];                          /**< Reserved */
+} BM_LinStatusInfoTypeDef;
+
+/**
+ * @typedef BM_LinMessageCtrlTypeDef
+ * @brief   Busmust LIN Message control fields.
+ */
+typedef struct {
+    uint32_t DLC : 4;                           /**< LIN message DLC(0-8) */
+    uint32_t TRANSMIT : 1;                      /**< Transfer direction: 0=receive, 1=transmit */
+    uint32_t WAKEUP : 1;                        /**< This is a wakeup event */
+    uint32_t SLEEP : 1;                         /**< This is a sleep event */
+    uint32_t ENHANCED_CHECKSUM : 1;             /**< Flag for enhanced checksum */
+    uint32_t USER_CHECKSUM : 1;                 /**< Flag for user defined checksum */
+    uint32_t SEQ : 7;                           /**< hardware-sync message ID */
+    uint32_t ISTXTASK : 1;                      /**< A indicator for TXTASK TEF event */
+    uint32_t ERRORS : 6;                        /**< Error code, see BM_LinErrorTypeDef for details */
+    uint32_t SYNC_BREAK : 1;                    /**< Header-only LIN frame indicator */
+    uint32_t CHECKSUM : 8;                      /**< Checksum value */
+} BM_LinMessageCtrlTypeDef;
+
+/**
+ * @typedef BM_LinMessageTypeDef
+ * @brief   Busmust LIN Message concrete type, usually used as payload of BM_DataTypeDef.
+ * @note    The total length of this structure is 16B.
+ */
+typedef struct
+{
+    uint8_t id;                                /**< LIN message ID */
+    uint8_t padding[3];
+    union
+    {
+        BM_LinMessageCtrlTypeDef lin;          /**< LIN message control fields. */
+    } ctrl;                                    /**< Message control fields. */
+    uint8_t payload[8];                        /**< LIN message payload */
+} BM_LinMessageTypeDef;
+
+/**
+ * @typedef BM_LinProtocolTimingTypeDef
+ * @brief   LIN protocol timing configuration, used in BM_LinProtocolConfigTypeDef.
+ */
+typedef struct
+{
+    uint8_t wakeLength;                     /**< 0:250us, 1:500us, 2:750us, ..., 7:2000us */
+    uint8_t breakLength;                    /**< 0:13bit, 1:15bit, 2:17bit, ..., 7:27bit */
+    uint8_t busInactiveTime;                /**< 0:4s, 1:6s, 2:8s, 3:10s */
+    uint8_t wakeupRepeatTime;               /**< 0:180ms, 1:200ms, 2:220ms, 3:240ms */
+} BM_LinProtocolTimingTypeDef;
+
+/**
+ * @typedef BM_LinProtocolConfigTypeDef
+ * @brief   LIN Protocol configuration, used by BM_SetLinProtocol() and BM_GetLinProtocol().
+ */
+typedef struct
+{
+    uint8_t version;                            /**< 0x13=LIN1.3, 0x20=LIN2.0, 0x21=LIN2.1, 0x22=LIN2.2 */
+    uint8_t checksum;                           /**< 0x00=manual, 0x01=normal, 0x02=enhanced */
+    uint8_t reserved[2];
+    BM_LinProtocolTimingTypeDef timing;
+    uint8_t reserved2[8];
+} BM_LinProtocolConfigTypeDef;
+
+typedef struct
+{
+    uint8_t type;           /**< 0 = invalid, 1 = unicast, 2 = broadcast */
+    uint8_t source;         /**< Source channel index (0-15) */
+    uint16_t target;        /**< Target channel: index if type==1, bitmask of target channels if type==2 */
+    uint16_t reserved;      /**< Reserved for future */
+    uint8_t flagsmask;      /**< Source message flag mask */
+    uint8_t flagsvalue;     /**< Source message flag value */
+    uint32_t idmask;        /**< Source message ID mask */
+    uint32_t idvalue;       /**< Source message ID value */
+} BM_MessageRouteTypeDef;
+
+/**
+ * @typedef BM_IsotpStatusTypeDef
+ * @brief   ISOTP status report, used by ISOTP operation callback function.
+ */
+typedef struct
+{
+    uint8_t  version;                           /**< Currently always 0x01 */
+    uint8_t  flowcontrol;                       /**< Current flow control status */
+    uint8_t  stmin;                             /**< Current flow control status */
+    uint8_t  blocksize;                         /**< Current flow control status */
+    uint32_t ntransferredbytes;                 /**< Number of transferred bytes by now. */
+    uint32_t ntotalbytes;                       /**< Number of total bytes indicated by ISOTP FF or SF. */
+    uint32_t timestamp;                         /**< Current timestamp reported by device. */
+    uint32_t reserved[4];                       /**< Reserved for future */
+} BM_IsotpStatusTypeDef;
+
+/**
+ * @typedef BM_IsotpCallbackHandle
+ * @brief   Pointer to a Callback function when ISOTP transaction progress updates.
+ */
+typedef uint8_t (*BM_IsotpCallbackHandle)(const BM_IsotpStatusTypeDef* status, uintptr_t userarg);
+
+/**
+ * @typedef BM_IsotpConfigTypeDef
+ * @brief   ISOTP Protocol (See ISO15765-2 for details) configuration, used by BM_ReadIsotp()/BM_WriteIsotp().
+ */
+typedef struct
+{
+    uint8_t version;                            /**< Currently must be set to 0x01 */
+    uint8_t mode;                               /**< See BM_IsotpModeTypeDef for details */
+    struct
+    {
+        uint16_t a;
+        uint16_t b;
+        uint16_t c;
+    } testerTimeout;
+    struct
+    {
+        uint16_t a;
+        uint16_t b;
+        uint16_t c;
+    } ecuTimeout;
+    struct
+    {
+        uint8_t stmin;
+        uint8_t blockSize;
+        uint8_t fcFrameLength;
+        uint8_t hardwareIsotpDisabled;
+    } flowcontrol;
+    uint8_t extendedAddress;
+    uint8_t paddingEnabled;
+    uint8_t paddingValue;
+    uint8_t longPduEnabled;
+    uint8_t functionalAddressingEnabled;
+    uint8_t padding[1];
+    BM_IsotpCallbackHandle callbackFunc;
+    uintptr_t callbackUserarg;
+    BM_DataTypeDef testerDataTemplate;
+    BM_DataTypeDef ecuDataTemplate;
+} BM_IsotpConfigTypeDef;
+
+
+/**
+ * @enum  BM_StorageModeTypeDef / BM_StorageDirectionTypeDef / BM_StorageFormatTypeDef / BM_StoragePathModeTypeDef
+ * @brief Logging or replay enums, used in BM_LoggingConfigTypeDef and BM_ReplayConfigTypeDef.
+ */
+typedef enum { BM_STORAGE_DISABLED = 0, BM_STORAGE_ALWAYS_ON, BM_STORAGE_TRIGGERED } BM_StorageModeTypeDef;
+typedef enum { BM_STORAGE_DIRECTION_NONE = 0, BM_STORAGE_DIRECTION_RX, BM_STORAGE_DIRECTION_TX,
+               BM_STORAGE_DIRECTION_ALL = BM_STORAGE_DIRECTION_RX | BM_STORAGE_DIRECTION_TX } BM_StorageDirectionTypeDef;
+typedef enum { BM_STORAGE_DEFAULT_FORMAT = 0, BM_STORAGE_BBD_FORMAT = BM_STORAGE_DEFAULT_FORMAT,
+               BM_STORAGE_PCAP_FORMAT = 1, BM_STORAGE_LOG_FORMAT = 2, BM_STORAGE_ASC_FORMAT = 3,
+               BM_STORAGE_BLF_FORMAT = 4 } BM_StorageFormatTypeDef;
+typedef enum { BM_STORAGE_FIXED_PATH = 0, BM_STORAGE_INDEX_PATH, BM_STORAGE_TIME_PATH } BM_StoragePathModeTypeDef;
+
+/**
+ * @typedef BM_PathSpecTypeDef
+ * @brief   File Path spec (on data files), used by BM_LoggingConfigTypeDef and BM_ReplayConfigTypeDef.
+ */
+typedef struct
+{
+    uint8_t mode;                           /**< Naming mode, see BM_StoragePathModeTypeDef for details */
+    uint8_t arg;                            /**< Mode argument, reserved for future */
+    char format[30];                        /**< A printf-like string, used by path mode parser */
+} BM_PathSpecTypeDef;
+
+/**
+ * @typedef BM_EventTriggerTypeDef
+ * @brief   Event trigger (on rx messages), used by BM_LoggingConfigTypeDef and BM_ReplayConfigTypeDef.
+ */
+typedef struct
+{
+    uint16_t channels;                      /**< A Bitmask of RX channels */
+    uint16_t reserved;
+    uint16_t flags_mask;
+    uint16_t flags_value;
+    uint32_t id_mask;
+    uint32_t id_value;
+} BM_EventTriggerTypeDef;
+
+typedef struct
+{
+    uint8_t  createNewFileOnStart;
+    uint8_t  overwriteOldFileOnFull;
+    uint16_t nfiles;
+    uint32_t nmessagesPerFile;
+    uint32_t nbytesPerFile;
+    uint32_t nsecondsPerFile;
+} BM_LoggingSegmentationTypeDef;
+
+typedef struct
+{
+    uint16_t msgdelay;
+    uint16_t sessiondelay;
+    uint16_t cycledelay;
+    uint8_t forceZeroTimestampOnFirstMsg;
+    uint8_t reserved[1];
+} BM_ReplayTimingTypeDef;
+
+/**
+ * @typedef BM_LoggingConfigTypeDef
+ * @brief   Logging configuration, used by BM_SetLogging().
+ */
+typedef struct
+{
+    uint8_t version;                            /**< Currently must be set to 0x01 */
+    uint8_t mode;                               /**< Logging mode, see BM_StorageModeTypeDef for details */
+    uint8_t format;                             /**< Log file format, see BM_StorageFormatTypeDef for details */
+    uint8_t reserved;
+    uint16_t channels;
+    uint8_t direction;                          /**< Logging direction, see BM_StorageDirectionTypeDef for details */
+    uint8_t padding[9];
+    BM_PathSpecTypeDef path;
+    BM_EventTriggerTypeDef starttrigger;
+    BM_EventTriggerTypeDef stoptrigger;
+    BM_LoggingSegmentationTypeDef segmentation;
+} BM_LoggingConfigTypeDef;
+
+/**
+ * @typedef BM_ReplayConfigTypeDef
+ * @brief   Replay configuration, used by BM_SetReplay().
+ */
+typedef struct
+{
+    uint8_t version;                            /**< Currently must be set to 0x01 */
+    uint8_t mode;                               /**< Replay mode, see BM_StorageModeTypeDef for details */
+    uint8_t format;                             /**< Replay file format, see BM_StorageFormatTypeDef for details */
+    uint8_t reserved;
+    uint16_t channels;
+    uint8_t direction;                          /**< Replay direction, see BM_StorageDirectionTypeDef for details */
+    uint8_t cyclic;
+    uint8_t padding[8];
+    BM_PathSpecTypeDef path;
+    BM_EventTriggerTypeDef starttrigger;
+    BM_EventTriggerTypeDef stoptrigger;
+    BM_ReplayTimingTypeDef timing;
+} BM_ReplayConfigTypeDef;
+
+/* OR-bitmask CAN mode additions (bm_usb_def.h 1.14.2.45). */
+#ifndef BM_CAN_NON_ISO_MODE
+#define BM_CAN_NON_ISO_MODE 0x08
+#endif
+#ifndef BM_CAN_NON_AUTORETX_MODE
+#define BM_CAN_NON_AUTORETX_MODE 0x10
+#endif
+#ifndef BM_CAN_NOACK_MODE
+#define BM_CAN_NOACK_MODE 0x20
+#endif
+#ifndef BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY
+#define BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY 0x40
+#endif
+
+BMAPI BM_StatusTypeDef BM_Activate(BM_ChannelHandle handle);
+BMAPI BM_StatusTypeDef BM_Deactivate(BM_ChannelHandle handle);
+BMAPI BM_StatusTypeDef BM_RecoverBusOff(BM_ChannelHandle handle);
+BMAPI BM_StatusTypeDef BM_CancelWrite(BM_ChannelHandle handle);
+BMAPI BM_StatusTypeDef BM_EnumerateByCap(BM_ChannelInfoTypeDef channelinfos[], int* nchannels, uint16_t cap);
+BMAPI BM_StatusTypeDef BM_EnumerateRemote(BM_ChannelInfoTypeDef channelinfos[], int* nchannels, uint8_t ipv4[4], int timeout);
+BMAPI BM_StatusTypeDef BM_QueryRemoteSession(const uint8_t ipv4[4], int timeout_ms, BM_RemoteSessionInfoTypeDef* info);
+BMAPI BM_StatusTypeDef BM_ClaimRemoteSession(BM_RemoteSessionHandle* session, const uint8_t ipv4[4], const BM_RemoteSessionConfigTypeDef* config, BM_RemoteSessionInfoTypeDef* info);
+BMAPI BM_StatusTypeDef BM_GetRemoteSessionInfo(BM_RemoteSessionHandle session, BM_RemoteSessionInfoTypeDef* info);
+BMAPI BM_StatusTypeDef BM_ReleaseRemoteSession(BM_RemoteSessionHandle session);
+BMAPI BM_ChannelHandle BM_OpenRemote(uint8_t ipv4[4], const BM_ChannelInfoTypeDef* localinfo);
+BMAPI BM_StatusTypeDef BM_GetChannelInfo(BM_ChannelHandle handle, BM_ChannelInfoTypeDef* info);
+BMAPI BM_StatusTypeDef BM_ResetDevice(BM_DeviceHandle handle);
+BMAPI BM_StatusTypeDef BM_GetDevice(BM_ChannelHandle channel, BM_DeviceHandle* device);
+BMAPI BM_StatusTypeDef BM_SetBuffer(BM_DeviceHandle device, BM_BufferTypeDef type, BM_BufferId id);
+BMAPI BM_StatusTypeDef BM_SetPtpMode(BM_ChannelHandle handle, BM_PtpModeTypeDef mode);
+BMAPI BM_StatusTypeDef BM_SetPtpTime(BM_ChannelHandle handle, uint64_t ns);
+BMAPI BM_StatusTypeDef BM_GetPtpTime(BM_ChannelHandle handle, uint64_t* ns);
+BMAPI uint64_t BM_GetHostPtpTime(void);
+BMAPI BM_StatusTypeDef BM_SyncPtpTimes(BM_ChannelHandle handles[], int nhandles);
+BMAPI BM_StatusTypeDef BM_MapTimestamp(BM_ChannelHandle handle, uint32_t timestamp32, uint64_t* timestamp64);
+BMAPI BM_StatusTypeDef BM_ReadMultiple(BM_ChannelHandle handle, BM_DataTypeDef data[], uint32_t* nmessages, int timeout);
+BMAPI BM_StatusTypeDef BM_ReadMultipleCanMessage(BM_ChannelHandle handle, BM_CanMessageTypeDef msg[], uint32_t* nmessages, int timeout, uint32_t channel[], uint32_t timestamp[]);
+BMAPI BM_StatusTypeDef BM_ReadIsotp(BM_ChannelHandle handle, const void* data, uint32_t* nbytes, int timeout, BM_IsotpConfigTypeDef* config);
+BMAPI BM_StatusTypeDef BM_ReadLinMessage(BM_ChannelHandle handle, BM_LinMessageTypeDef* msg, uint32_t* channel, uint32_t* timestamp);
+BMAPI BM_StatusTypeDef BM_WriteIsotp(BM_ChannelHandle handle, const void* data, uint32_t nbytes, int timeout, BM_IsotpConfigTypeDef* config);
+BMAPI BM_StatusTypeDef BM_WriteLinMessage(BM_ChannelHandle handle, BM_LinMessageTypeDef* msg, uint32_t _channel, int timeout, uint32_t* timestamp);
+BMAPI BM_StatusTypeDef BM_WriteMultiple(BM_ChannelHandle handle, const BM_DataTypeDef data[], uint32_t* nmessages, int timeout, uint32_t timestamp[]);
+BMAPI BM_StatusTypeDef BM_WriteMultipleCanMessage(BM_ChannelHandle handle, const BM_CanMessageTypeDef msg[], uint32_t* nmessages, uint32_t _channel[], int timeout, uint32_t timestamp[]);
+BMAPI BM_StatusTypeDef BM_GetCanStatus(BM_ChannelHandle handle, BM_CanStatusInfoTypedef* statusinfo);
+BMAPI BM_StatusTypeDef BM_GetLinStatus(BM_ChannelHandle handle, BM_LinStatusInfoTypeDef* statusinfo);
+BMAPI BM_StatusTypeDef BM_GetTxTasks(BM_ChannelHandle handle, BM_TxTaskTypeDef* txtasks, int ntxtasks);
+BMAPI BM_StatusTypeDef BM_GetMsgRoutes(BM_ChannelHandle handle, BM_MessageRouteTypeDef* msgroutes, int nmsgroute);
+BMAPI BM_StatusTypeDef BM_SetMode(BM_ChannelHandle handle, uint32_t mode);
+BMAPI BM_StatusTypeDef BM_SetLinMode(BM_ChannelHandle handle, BM_LinModeTypeDef mode);
+BMAPI BM_StatusTypeDef BM_GetCanMode(BM_ChannelHandle handle, BM_CanModeTypeDef* mode);
+BMAPI BM_StatusTypeDef BM_SetSleepStatus(BM_ChannelHandle handle, BM_SleepStatusTypeDef status);
+BMAPI BM_StatusTypeDef BM_GetSleepStatus(BM_ChannelHandle handle, BM_SleepStatusTypeDef status);
+BMAPI BM_StatusTypeDef BM_GetTerminalRegister(BM_ChannelHandle handle, BM_TerminalResistorTypeDef* tres);
+BMAPI BM_StatusTypeDef BM_SetLinVoltage(BM_ChannelHandle handle, BM_LinVoltageTypeDef voltage);
+BMAPI BM_StatusTypeDef BM_GetLinVoltage(BM_ChannelHandle handle, BM_LinVoltageTypeDef* voltage);
+BMAPI BM_StatusTypeDef BM_SetLinProtocol(BM_ChannelHandle handle, const BM_LinProtocolConfigTypeDef* protocol);
+BMAPI BM_StatusTypeDef BM_GetLinProtocol(BM_ChannelHandle handle, BM_LinProtocolConfigTypeDef* protocol);
+BMAPI BM_StatusTypeDef BM_SetLinBitrate(BM_ChannelHandle handle, uint16_t bitrate);
+BMAPI BM_StatusTypeDef BM_SetEthSpeed(BM_ChannelHandle handle, uint16_t bitrate);
+BMAPI BM_StatusTypeDef BM_GetBitrate(BM_ChannelHandle handle, BM_BitrateTypeDef* bitrate);
+BMAPI BM_StatusTypeDef BM_SetMsgRoutes(BM_ChannelHandle handle, BM_MessageRouteTypeDef* msgroutes, int nmsgroute);
+BMAPI BM_StatusTypeDef BM_GetRxFilters(BM_ChannelHandle handle, BM_RxFilterTypeDef* rxfilters, int nrxfilters);
+BMAPI BM_StatusTypeDef BM_GetDataPtpTimestamp(BM_ChannelHandle channel, BM_DataTypeDef* data, uint64_t* timestamp);
+BMAPI BM_LogLevelTypeDef BM_GetLogLevel(void);
+BMAPI void BM_SetLogLevel(BM_LogLevelTypeDef level);
+BMAPI void BM_SetThreadPriority(uint32_t priority);
+BMAPI uint32_t BM_GetVersion(void);
+BMAPI BM_StatusTypeDef BM_GetLogging(BM_ChannelHandle handle, BM_LoggingConfigTypeDef* logging);
+BMAPI BM_StatusTypeDef BM_SetLogging(BM_ChannelHandle handle, BM_LoggingConfigTypeDef* logging);
+BMAPI BM_StatusTypeDef BM_GetReplay(BM_ChannelHandle handle, BM_ReplayConfigTypeDef* replay);
+BMAPI BM_StatusTypeDef BM_SetReplay(BM_ChannelHandle handle, BM_ReplayConfigTypeDef* replay);
+BMAPI BM_StatusTypeDef BM_LoadConfig(BM_ChannelHandle handle, uint32_t configmask);
+BMAPI BM_StatusTypeDef BM_SaveConfig(BM_ChannelHandle handle, uint32_t configmask);
+BMAPI BM_StatusTypeDef BM_ClearConfig(BM_ChannelHandle handle, uint32_t configmask);
 
 #ifdef __cplusplus
 };

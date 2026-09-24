@@ -2,7 +2,7 @@
  * @file        bm_usb_def.h
  * @brief       Busmust USB device data type definitions.
  * @author      busmust
- * @version     1.14.2.43
+ * @version     1.15.0.46
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -447,6 +447,13 @@ typedef enum
     BM_TXTASK_RANDOMDATA,               /**< Random Data TX task */
     BM_TXTASK_RANDOMID,                 /**< Random ID TX task */
 } BM_TxTaskTypeTypeDef;
+
+/** Incremental configuration update preserving task timing and execution progress;
+ *  updates the complete template (including ID/data/checksum), without restarting it. */
+typedef enum
+{
+    BM_TXTASK_FLAGS_KEEP_CONTEXT = 0x80U,
+} BM_TxTaskFlagsTypeDef;
 
 /**
  * @enum  BM_StatTypeDef
@@ -1013,7 +1020,7 @@ typedef struct
         uint8_t version;                        /**< Version of BM_TxTaskTypeDef, set to 1 for BMAPI1.x. */
         uint8_t unused;                         /**< For backward-compatibility only */
     };
-    uint8_t  flags;                             /**< CAN message control Flags, see BM_MessageFlagsTypeDef for details. */
+    uint8_t  flags;                             /**< Frame flags and optional BM_TXTASK_FLAGS_KEEP_CONTEXT update policy. */
     struct
     {
         uint8_t length : 7;                     /**< Length of payload in unit given by 'lengthunit' (not DLC) */

@@ -55,7 +55,7 @@ BMAPI SDK 包含一系列运行时库和例程，支持应用程序通过 Busmus
 | 目录 | 说明 |
 |------|------|
 | `doc/` | 文档和参考资料 |
-| `include/` | 头文件：`bmapi.h`、`bm_usb_def.h`、`osal.h` |
+| `include/` | 核心 API 头文件，以及可选的仿真数据结构与原生 E2E 插件 ABI 定义 |
 | `example/` | 各语言例程 |
 
 ## 例程清单
@@ -95,6 +95,7 @@ BMAPI SDK 包含一系列运行时库和例程，支持应用程序通过 Busmus
 
 - **`BM_Read` 是轮询式**：每次 `BM_WaitForNotification` 通知后，必须通过 `BM_Read` 循环将队列**读空**（直到返回 `BM_ERROR_QRCVEMPTY`），因为一个通知可能对应多条报文
 - **`BM_Write` 超时机制**：超时=0 为异步模式（不消耗 TEF），超时≠0 为阻塞模式（消耗 TEF 等待 ACK）
+- **运行中周期任务更新**：在兼容固件（三代 3.2.0+、二代半 2.6.1+）上，可通过 `BM_SetTxTask` 配合 `BM_TXTASK_FLAGS_KEEP_CONTEXT` 更新单个硬件周期任务，并保留其周期相位和执行上下文。
 - **设备独占**：一个物理设备只能被一个进程打开
 - **多线程**：`WriteXXX`/`ReadXXX` 支持多线程，但 `OpenEx` 和 `SetXXX` **不支持**
 - **BUSOFF 恢复**：参考 `bmapi_transmit_only` 例程中的 `recoverFromError()` 函数

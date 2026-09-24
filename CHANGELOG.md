@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.15.0.46 [2026-09-24]
+
+1. Added the indexed `BM_SetTxTask` API and the `BM_TXTASK_FLAGS_KEEP_CONTEXT` update flag. On Gen3 firmware 3.2.0 or later and Gen2.5 firmware 2.6.1 or later, batch updates are committed transactionally and running tasks can retain their period phase, remaining rounds, and pattern context; older firmware continues to use the legacy compatibility path.
+2. Improved python-can 4.6.1 hardware periodic-task support so `modify_data()` can update a running task without restarting it, and added the `periodic_modify.py` example.
+3. Fixed periodic rollover of some LIN PTP timestamps and strengthened validation of truncated CAN/CAN FD/LIN records, short messages, and PTP-tail placement so invalid tail data is not treated as a valid timestamp.
+4. Fixed an unconsumed TX queue reservation after a zero-progress USB write, which could otherwise cause persistent TXFULL errors, prevent buffer clearing, and require reconnecting the device.
+5. Improved `BM_RecoverBusOff` for remote channels by using firmware-side recovery on compatible GWR firmware and returning the exact recovery status, while preserving the existing compatibility paths for local devices and older firmware.
+
+## 1.14.2.45 [2026-09-13]
+
+1. Updated the C#, VB.NET, LabVIEW, python-can, and python-lin bindings to the latest BMAPI interface, adding the relevant APIs and constants and fixing declaration and calling compatibility issues.
+2. Fixed stability and memory-safety issues in concurrent transmission, transmit-timeout recovery, and CAN/CAN FD/LIN message I/O in PTP mode.
+
+## 1.14.2.44 [2026-09-03]
+
+1. Fixed a Linux `BM_AutosetEx` Active-mode hang after a synchronous probe transmission timed out, so CAN/CAN FD bitrate detection completes within its configured bounds and remains reusable for subsequent scans.
+2. Made timeout recovery consistent across `BM_Write`, `BM_WriteMultiple`, `BM_WriteMultipleCanMessage`, and hardware `BM_WriteIsotp`: buffer cleanup no longer blocks receive/TEF dispatch and avoids duplicate cleanup or clearing a newer concurrent transmission.
+
 ## 1.14.2.43 [2026-08-28]
 
 1. Improved multi-device and multi-channel CAN/CAN FD transmit scheduling so a busy or temporarily stalled channel no longer delays other channels.

@@ -69,6 +69,7 @@ public enum BM_StatusTypeDef
     BM_ERROR_ILLPARAMVAL = 0x08000,             /**< Invalid parameter value in API call */
     BM_ERROR_UNKNOWN = 0x10000,                 /**< Unknown error */
     BM_ERROR_ILLDATA = 0x20000,                 /**< Invalid data received/transmitted */
+    BM_ERROR_CONFIG = 0x1000000,               /**< Invalid configuration */
     BM_ERROR_CAUTION = 0x2000000,               /**< Reserved */
     BM_ERROR_INITIALIZE = 0x4000000,            /**< The device/library is not initialized */
     BM_ERROR_ILLOPERATION = 0x8000000           /**< Invalid operation */
@@ -89,6 +90,10 @@ public enum BM_CanModeTypeDef
     BM_CAN_EXTERNAL_LOOPBACK_MODE = 0x05,       /**< The device is looping back messages externally, all transmitted messages are echoed by the device itself */
     BM_CAN_CLASSIC_MODE = 0x06,                 /**< The device is running normally (with the capability to handle only classical CAN2.0 messages */
     BM_CAN_RESTRICTED_MODE = 0x07,              /**< Reserved */
+    BM_CAN_NON_ISO_MODE = 0x08,                /**< OR-Bitmask: The device is running with the capability to handle CAN and NON-ISO(Bosch) CANFD messages */
+    BM_CAN_NON_AUTORETX_MODE = 0x10,           /**< OR-Bitmask: The device will not try to re-transmit failed messages if this bitmask is set */
+    BM_CAN_NOACK_MODE = 0x20,                  /**< OR-Bitmask: ACK from remote ECU is not checked, always try to send message */
+    BM_CAN_DISABLE_AUTO_BUSOFF_RECOVERY = 0x40, /**< OR-Bitmask: Disable automatic bus-off recovery, only manual BM_RecoverBusOff() triggers recovery */
 };
 
 /**
@@ -698,20 +703,85 @@ public struct BM_DataHeaderTypeDef
  * @typedef BM_DataTypeDef
  * @brief   Busmust data, abstract structure which holds concrete payload messages of various types (i.e. CAN messages).
  */
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct BM_DataTypeDef
 {
     public BM_DataHeaderTypeDef header;             /**< data header, see BM_DataHeaderTypeDef for details. */
     public ushort length;                           /**< length in bytes of the payload only (header excluded). */
     public uint timestamp;                          /**< 32-bit device local high precision timestamp in microseconds. */
-    public BM_CanMessageTypeDef can;                /**< buffer holding concrete message payload (i.e. a CAN message in BM_CanMessageTypeDef format). */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = (int)BMAPI.BM_DATA_PAYLOAD_MAX_SIZE)]
+    public byte[] payload;                          /**< raw payload holding a concrete message followed by an optional data tail. */
+
+    public BM_CanMessageTypeDef can
+    {
+        get { return GetCanMessage(); }
+        set { SetCanMessage(value); }
+    }
 
     public BM_DataTypeDef(BM_DataHeaderTypeDef header, ushort length, uint timestamp, BM_CanMessageTypeDef canMsg)
     {
         this.header = header;
         this.length = length;
         this.timestamp = timestamp;
-        this.can = canMsg;
+        this.payload = new byte[BMAPI.BM_DATA_PAYLOAD_MAX_SIZE];
+        SetCanMessage(canMsg);
+    }
+
+    public BM_CanMessageTypeDef GetCanMessage()
+    {
+        BM_CanMessageTypeDef message = new BM_CanMessageTypeDef();
+        if (payload == null || payload.Length < Marshal.SizeOf(typeof(BM_CanMessageTypeDef)))
+        {
+            return message;
+        }
+
+        IntPtr buffer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BM_CanMessageTypeDef)));
+        try
+        {
+            Marshal.Copy(payload, 0, buffer, Marshal.SizeOf(typeof(BM_CanMessageTypeDef)));
+            return (BM_CanMessageTypeDef)Marshal.PtrToStructure(buffer, typeof(BM_CanMessageTypeDef));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    public void SetCanMessage(BM_CanMessageTypeDef message)
+    {
+        if (payload == null || payload.Length != BMAPI.BM_DATA_PAYLOAD_MAX_SIZE)
+        {
+            payload = new byte[BMAPI.BM_DATA_PAYLOAD_MAX_SIZE];
+        }
+
+        IntPtr buffer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(BM_CanMessageTypeDef)));
+        try
+        {
+            Marshal.StructureToPtr(message, buffer, false);
+            int messageSize = Marshal.SizeOf(typeof(BM_CanMessageTypeDef));
+            int tailSize = (int)BMAPI.BM_DATA_TAIL_SIZE;
+            int bytesToCopy = messageSize;
+            int tailOffset = -1;
+            byte[] tail = null;
+            if ((header.GetFlags() & 1) != 0 && length >= tailSize && length <= payload.Length)
+            {
+                tailOffset = length - tailSize;
+                bytesToCopy = Math.Min(messageSize, tailOffset);
+                tail = new byte[tailSize];
+                Array.Copy(payload, tailOffset, tail, 0, tail.Length);
+            }
+            Marshal.Copy(buffer, payload, 0, bytesToCopy);
+            if (tail != null)
+            {
+                Array.Copy(tail, 0, payload, tailOffset, tail.Length);
+            }
+            if (length == 0) { length = (ushort)messageSize; }
+        }
+        finally
+        {
+            Marshal.DestroyStructure(buffer, typeof(BM_CanMessageTypeDef));
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 };
 
@@ -1089,8 +1159,243 @@ public struct BM_ReplayConfigTypeDef
 };
 
 
+/**
+ * @enum  BM_PtpModeTypeDef
+ * @brief PTP timestamp synchronization mode values, used by BM_SetPtpMode() to change the synchronization mode for a given hardware channel.
+ */
+public enum BM_PtpModeTypeDef
+{
+    BM_PTP_DISABLED = 0,       /**< Disable PTP feature, work asynchronously using hardware local timestamp                 */
+    BM_PTP_INPUT_USB_SOF = 1,  /**< Use host computer's USB SOF packet to sync with host computer                           */
+    BM_PTP_INPUT_PPS = 2,      /**< PTP slave: Use dedicated PPS input pin (if supported by hardware) as sync pulse input   */
+    BM_PTP_OUTPUT_PPS = 4,     /**< PTP master: Use dedicated PPS input pin (if supported by hardware) as sync pulse output */
+};
+
+public enum BM_AutosetModeTypeDef
+{
+    BM_AUTOSET_PASSIVE_LISTEN = 0,     /**< Listen-only detection: do not transmit or ACK CAN frames. */
+    BM_AUTOSET_ACTIVE_DETECT = 1,      /**< Active detection: send probe frames in normal mode and require TX ACK. */
+};
+
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_AutosetProbeMessageTypeDef
+{
+    public uint id;
+    public uint ctrl;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)]
+    public byte[] payload;
+};
+
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_AutosetConfigTypeDef
+{
+    public byte version;                              /**< Currently must be set to 0x01. */
+    public byte mode;                                 /**< See BM_AutosetModeTypeDef for details. */
+    public byte minLockMessages;                      /**< Required RX or TX-ACK confirmations, values below 3 use the default minimum of 3. */
+    public byte reserved0;                            /**< Reserved, set to 0. */
+    public ushort passiveObservationMs;               /**< Passive listen time per candidate, default is selected internally when set to 0. */
+    public ushort activeWriteTimeoutMs;               /**< Active probe write timeout in milliseconds, default is 50 when set to 0. */
+    public BM_AutosetProbeMessageTypeDef probeMessage;/**< Active probe CAN template; ID and payload are used, FD/BRS/DLC are adjusted per candidate. */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+    public uint[] reserved;                           /**< Reserved, set to 0. */
+};
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+public delegate uint BM_AutosetCallbackHandle(
+    ref BM_BitrateTypeDef bitrate,
+    BM_TerminalResistorTypeDef tres,
+    int nrxmessages,
+    IntPtr userarg
+);
+
+/**
+ * @enum  BM_SleepStatusTypeDef
+ * @brief Sleep status codes, used by BM_SetSleepStatus() to change the sleep status of a physical channel.
+ */
+public enum BM_SleepStatusTypeDef
+{
+    BM_WAKEUP = 0,                    /**< Channel is awake */
+    BM_SLEEP = 1,                     /**< Channel is sleeping */
+};
+
+/**
+ * @enum  BM_BufferTypeDef
+ * @brief Buffer direction flag, used by BM_SetBuffer() to select the read or write side.
+ */
+public enum BM_BufferTypeDef
+{
+    BM_WRITE_BUFFER = 0,              /**< Write buffer */
+    BM_READ_BUFFER = 0x8000           /**< Read buffer */
+};
+
+/**
+ * @enum  BM_BufferId
+ * @brief Buffer identifiers, used by BM_SetBuffer() to switch the internal buffer target.
+ */
+public enum BM_BufferId
+{
+    BM_DEFAULT_BUFFER = 0x0000,       /**< Default buffer: txq for write, rxq for read */
+    BM_LOGGINGFILE_BUFFER = 0x0001,   /**< Buffer for logging file operations */
+    BM_REPLAYFILE_BUFFER = 0x0002,    /**< Buffer for replay file operations */
+    BM_LOGGINGQ_BUFFER = 0x0111,      /**< Buffer for logging queue */
+    BM_REPLAYQ_BUFFER = 0x0222,       /**< Buffer for replay queue */
+    BM_RXQ_BUFFER = 0x1111,           /**< RX queue buffer (compatible with BM_ClearBuffer) */
+    BM_TXQ_BUFFER = 0x2222,           /**< TX queue buffer (compatible with BM_ClearBuffer) */
+    BM_NO_BUFFER = 0xFFFF             /**< No buffer: direct physical channel access for low latency */
+};
+
+/** Owner category reported for a remote control session. */
+public enum BM_RemoteOwnerTypeDef
+{
+    BM_REMOTE_OWNER_NONE = 0,
+    BM_REMOTE_OWNER_LOCAL = 1,
+    BM_REMOTE_OWNER_REMOTE = 2
+};
+
+/** Current state of a remote control session. */
+public enum BM_RemoteSessionStateTypeDef
+{
+    BM_REMOTE_SESSION_UNKNOWN = 0,
+    BM_REMOTE_SESSION_AVAILABLE = 1,
+    BM_REMOTE_SESSION_CLAIMED = 2,
+    BM_REMOTE_SESSION_EXPIRED = 3,
+    BM_REMOTE_SESSION_FAULTED = 4
+};
+
+/** Capabilities advertised by a remote control-session endpoint. */
+public enum BM_RemoteSessionCapabilityTypeDef
+{
+    BM_REMOTE_SESSION_CAP_NONE = 0,
+    BM_REMOTE_SESSION_CAP_CLAIM = 0x01,
+    BM_REMOTE_SESSION_CAP_HEARTBEAT = 0x02,
+    BM_REMOTE_SESSION_CAP_CHANNEL_RELEASE = 0x04,
+    BM_REMOTE_SESSION_CAP_CONTROL_STATUS = 0x08,
+    BM_REMOTE_SESSION_CAP_TX_SEQ_TRANSLATION = 0x10
+};
+
+/** Protocol-level result reported for a remote control-session operation. */
+public enum BM_RemoteSessionResultTypeDef
+{
+    BM_REMOTE_SESSION_RESULT_OK = 0,
+    BM_REMOTE_SESSION_RESULT_UNSUPPORTED = 1,
+    BM_REMOTE_SESSION_RESULT_BUSY = 2,
+    BM_REMOTE_SESSION_RESULT_STALE = 3,
+    BM_REMOTE_SESSION_RESULT_DENIED = 4,
+    BM_REMOTE_SESSION_RESULT_INVALID = 5,
+    BM_REMOTE_SESSION_RESULT_INTERNAL = 6
+};
+
+/**
+ * @typedef BM_LinStatusInfoTypedef
+ * @brief   LIN channel status detailed information, retrieved by calling BM_GetLinStatus().
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_LinStatusInfoTypeDef
+{
+    public byte ACTIVE;                             /**< The LIN channel is in ACTIVE state */
+    public byte SLEEP;                              /**< The LIN channel is in SLEEP state */
+    public byte ERRORS;                             /**< Error status bitmask for the LIN channel, see BM_LinErrorTypeDef for details */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 5)]
+    public byte[] reserved;                         /**< Reserved */
+};
+
+/**
+ * @typedef BM_LinProtocolTimingTypeDef
+ * @brief   LIN protocol timing configuration, used in BM_LinProtocolConfigTypeDef.
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_LinProtocolTimingTypeDef
+{
+    public byte wakeLength;                         /**< 0:250us, 1:500us, 2:750us, ..., 7:2000us */
+    public byte breakLength;                        /**< 0:13bit, 1:15bit, 2:17bit, ..., 7:27bit */
+    public byte busInactiveTime;                    /**< 0:4s, 1:6s, 2:8s, 3:10s */
+    public byte wakeupRepeatTime;                   /**< 0:180ms, 1:200ms, 2:220ms, 3:240ms */
+};
+
+/**
+ * @typedef BM_LinProtocolConfigTypeDef
+ * @brief   LIN Protocol configuration, used by BM_SetLinProtocol() and BM_GetLinProtocol().
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_LinProtocolConfigTypeDef
+{
+    public byte version;                            /**< 0x13=LIN1.3, 0x20=LIN2.0, 0x21=LIN2.1, 0x22=LIN2.2, see BM_LinProtocolVersionTypeDef for details */
+    public byte checksum;                           /**< 0x00=manual, 0x01=normal, 0x02=enhanced, see BM_LinProtocolChecksumTypeDef for details */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)]
+    public byte[] reserved;                         /**< Reserved */
+    public BM_LinProtocolTimingTypeDef timing;      /**< LIN timing configuration */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+    public byte[] reserved2;                        /**< Reserved */
+};
+
+/**
+ * @typedef BM_MessageRouteTypeDef
+ * @brief   Message route item structure, used by BM_SetMsgRoutes() and BM_GetMsgRoutes().
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_MessageRouteTypeDef
+{
+    public byte type;                               /**< 0 = invalid, 1 = unicast, 2 = broadcast */
+    public byte source;                             /**< Source channel index (0-15) */
+    public ushort target;                           /**< Target channel: index if type==1, bitmask of target channels if type==2 */
+    public ushort reserved;                         /**< Reserved for future */
+    public byte flagsmask;                          /**< Source message flag mask, message will be routed if msg.flags & flagsmask == flagsvalue */
+    public byte flagsvalue;                         /**< Source message flag value, see BM_MessageFlagsTypeDef for details */
+    public uint idmask;                             /**< Source message ID mask, message will be routed if msg.id & idmask == idvalue */
+    public uint idvalue;                            /**< Source message ID value, see BM_MessageIdTypeDef for details */
+};
+
+/**
+ * @typedef BM_RemoteSessionConfigTypeDef
+ * @brief   Configuration used when claiming a remote control session via BM_ClaimRemoteSession().
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_RemoteSessionConfigTypeDef
+{
+    public uint size;                               /**< Set to (uint)Marshal.SizeOf(typeof(BM_RemoteSessionConfigTypeDef)). */
+    public uint version;                            /**< Set to BM_REMOTE_SESSION_ABI_VERSION. */
+    public uint timeout_ms;                         /**< Control-lock lease, 0 for the 10000 ms default. */
+    public uint heartbeat_interval_ms;              /**< 0 for the 2000 ms default; at most half the lease. */
+    public uint flags;                              /**< Must be zero in ABI version 1. */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+    public byte[] client_name;                      /**< Optional UTF-8 display name; NUL terminated. */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 44)]
+    public byte[] reserved;
+};
+
+/**
+ * @typedef BM_RemoteSessionInfoTypeDef
+ * @brief   Status and ownership information for a remote control session.
+ */
+[StructLayout(LayoutKind.Sequential)]
+public struct BM_RemoteSessionInfoTypeDef
+{
+    public uint size;
+    public uint version;
+    public uint capabilities;                       /**< Bitmask of BM_RemoteSessionCapabilityTypeDef values. */
+    public uint state;                              /**< See BM_RemoteSessionStateTypeDef for details. */
+    public uint result;                             /**< See BM_RemoteSessionResultTypeDef for details. */
+    public uint timeout_ms;
+    public uint expires_in_ms;
+    public uint config_generation;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+    public byte[] session_id;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+    public byte[] owner_ipv4;
+    public byte owner_kind;                         /**< See BM_RemoteOwnerTypeDef for details. */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
+    public byte[] reserved0;
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+    public byte[] owner_name;                       /**< UTF-8 display name; NUL terminated. */
+    [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+    public byte[] reserved;
+};
+
+
 class BMAPI
 {
+    public const uint BM_DATA_TAIL_SIZE = 16;   /**< Optional 16-byte data tail appended after the CAN message payload, see bm_usb_def.h. */
+    public const int BM_DATA_PAYLOAD_MAX_SIZE = 72 + (int)BM_DATA_TAIL_SIZE;
     /**
      * @brief  Initialize BMAPI library, this function shall be called before any other API calls and shall only be called once.
      * @return Operation status, see BM_StatusTypeDef for details.
@@ -1272,7 +1577,7 @@ class BMAPI
      * @return     Operation status, see BM_StatusTypeDef for details.
      * @note       This function is allowed to be called from multiple threads since BMAPI1.5.
      */
-    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl, EntryPoint = "BM_ReadIsotp")]
     public static extern BM_StatusTypeDef BM_ReadIsotpImpl(IntPtr handle, IntPtr data, ref uint nbytes, int timeout, ref BM_IsotpConfigTypeDef config);
 
     public static BM_StatusTypeDef BM_ReadIsotp(IntPtr handle, ref byte[] payload, ref uint nbytes, int timeout, ref BM_IsotpConfigTypeDef config)
@@ -1354,7 +1659,7 @@ class BMAPI
      * @return     Operation status, see BM_StatusTypeDef for details.
      * @note       This function is allowed to be called from multiple threads since BMAPI1.5.
      */
-    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl, EntryPoint = "BM_WriteIsotp")]
     public static extern BM_StatusTypeDef BM_WriteIsotpImpl(IntPtr handle, IntPtr data, uint nbytes, int timeout, ref BM_IsotpConfigTypeDef config);
 
     public static BM_StatusTypeDef BM_WriteIsotp(IntPtr handle, byte[] payload, int timeout, ref BM_IsotpConfigTypeDef config)
@@ -1597,7 +1902,7 @@ class BMAPI
      * @param[in]  language   Reserved, only English is supported currently.
      */
     [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void BM_GetErrorText(BM_StatusTypeDef errorcode, char[] buffer, int nbytes, ushort language);
+    public static extern void BM_GetErrorText(BM_StatusTypeDef errorcode, [Out] char[] buffer, int nbytes, ushort language);
 
     /**
      * @brief      Translate data (i.e. CAN message) to string, this is a helper function to ease application programming.
@@ -1607,7 +1912,7 @@ class BMAPI
      * @param[in]  language   Reserved, only English is supported currently.
      */
     [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void BM_GetDataText(ref BM_DataTypeDef data, char[] buffer, int nbytes, ushort language);
+    public static extern void BM_GetDataText(ref BM_DataTypeDef data, [Out] char[] buffer, int nbytes, ushort language);
 	
 	/**
 	 * @brief      Get library log level.
@@ -1635,4 +1940,416 @@ class BMAPI
 	 */
     [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
 	public static extern uint BM_GetVersion();
+    /* ==== APIs synchronized with BMAPI 1.14.2.45 ==== */
+
+    public const uint BM_REMOTE_SESSION_ABI_VERSION = 1;          /**< Remote control-session public ABI version, see bm_usb_def.h. */
+    public const uint BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS = 10000; /**< Default remote control-lock lease in milliseconds. */
+    public const uint BM_REMOTE_SESSION_DEFAULT_HEARTBEAT_MS = 2000; /**< Default remote control-session heartbeat interval in milliseconds. */
+
+    /**
+     * @brief Start AUTOSET sequence, for a BM-USB-CAN(FD) device, the AUTOSET sequence will detect the correct bitrate and terminal resistor.
+     * @param[in]  channelinfo  Info of the device channel to run AUTOSET on, usually the info is filled by BM_Enumerate().
+     * @param[out] bitrate      The detected bitrate.
+     * @param[out] tres         The detected terminal resistor.
+     * @param[in]  callback     A callback function which will be called on each step of AUTOSET.
+     * @param[in]  userarg      Arbitrary user argument of the callback function, this argument will be passed to the callback as is.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_Autoset(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    );
+
+    /**
+     * @brief Start AUTOSET sequence with explicit passive-listen or active-detect strategy.
+     * @param[in]  channelinfo  Info of the device channel to run AUTOSET on, usually the info is filled by BM_Enumerate().
+     * @param[out] bitrate      The detected bitrate.
+     * @param[out] tres         The detected terminal resistor.
+     * @param[in]  config       AUTOSET configuration. When NULL, passive listen defaults are used.
+     * @param[in]  callback     A callback function which will be called on each step of AUTOSET.
+     * @param[in]  userarg      Arbitrary user argument of the callback function, this argument will be passed to the callback as is.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_AutosetEx(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        ref BM_AutosetConfigTypeDef config,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    );
+
+    [DllImport("BMAPI.DLL", EntryPoint = "BM_AutosetEx", CallingConvention = CallingConvention.Cdecl)]
+    private static extern BM_StatusTypeDef BM_AutosetExDefaultImpl(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        IntPtr config,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    );
+
+    /**
+     * @brief Start AUTOSET with the native passive-listen default configuration.
+     */
+    public static BM_StatusTypeDef BM_AutosetEx(
+        ref BM_ChannelInfoTypeDef channelinfo,
+        ref BM_BitrateTypeDef bitrate,
+        ref BM_TerminalResistorTypeDef tres,
+        BM_AutosetCallbackHandle callback,
+        IntPtr userarg
+    )
+    {
+        return BM_AutosetExDefaultImpl(ref channelinfo, ref bitrate, ref tres, IntPtr.Zero, callback, userarg);
+    }
+
+    /**
+     * @brief      Recover from CAN BUSOFF state.
+     *             Gen2/Gen2.5 firmware 2.6.0.0+ and Gen3 firmware 3.1.0.0+ use
+     *             firmware-side recovery. Gen2/Gen2.5 firmware below 2.6.0.0 and
+     *             Gen3 firmware 3.0.x use loopback + dummy message recovery.
+     * @param[in]  handle  Handle to the channel to recover.
+     * @return    Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_RecoverBusOff(IntPtr handle);
+
+    /**
+     * @brief     Cancel all pending write requests for a given channel, this operation will release internal listener resources in a multi-threading environment.
+     * @param[in] handle  Handle to the channel to cancel writing.
+     * @return    Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_CancelWrite(IntPtr handle);
+
+    /**
+     * @brief      Get channel information, please only open a channel and get its handle before calling BM_GetChannelInfo().
+     * @param[in]  handle  Handle to the channel to query.
+     * @param[out] info    A caller-allocated buffer for the returned channel information.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetChannelInfo(IntPtr handle, ref BM_ChannelInfoTypeDef info);
+
+    /**
+     * @brief      Open the specified remote device port.
+     * @param[in]  ipv4  Remote IPV4, note this is the forwarding-target ip when creating a virtual remote-forwarding channel.
+     * @param[in]  localinfo  Optional local server information for networking service, pass IntPtr.Zero if not required.
+     * @return Handle to the opened CAN device channel, return NULL if failed to open the specified port.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr BM_OpenRemote(byte[] ipv4, IntPtr localinfo);
+
+    /**
+     * @brief      Query remote control-lock support and the current owner without claiming.
+     * @param[in]  ipv4  The IPV4 unicast/broadcast address in which to find remote devices, in network byte order.
+     * @param[in]  timeout_ms  Timeout for this request only, no lease effect.
+     * @param[out] info  Remote session status and ownership information.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_QueryRemoteSession(byte[] ipv4, int timeout_ms, ref BM_RemoteSessionInfoTypeDef info);
+
+    /**
+     * @brief      Claim the remote control session and start automatic heartbeats.
+     *             This never falls back to unlocked mode. The handle must be released via BM_ReleaseRemoteSession().
+     * @param[out] session  The claimed remote session handle.
+     * @param[in]  ipv4  The IPV4 address of the remote device, in network byte order.
+     * @param[in]  config  Remote session configuration, see BM_RemoteSessionConfigTypeDef for details.
+     * @param[out] info  Remote session status and ownership information.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_ClaimRemoteSession(ref IntPtr session, byte[] ipv4, ref BM_RemoteSessionConfigTypeDef config, ref BM_RemoteSessionInfoTypeDef info);
+
+    /**
+     * @brief      Query live status for a claimed remote session.
+     * @param[in]  session  The claimed remote session handle.
+     * @param[out] info  Remote session status and ownership information.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetRemoteSessionInfo(IntPtr session, ref BM_RemoteSessionInfoTypeDef info);
+
+    /**
+     * @brief      Release the remote control session and destroy the handle.
+     *             BM_UnInit also performs best-effort release of outstanding handles.
+     * @param[in]  session  The remote session handle to release.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_ReleaseRemoteSession(IntPtr session);
+
+    /**
+     * @brief      Get the device handle which an opened channel belongs to.
+     * @param[in]  channel  Handle to the opened channel.
+     * @param[out] device   Handle to the device that owns the channel.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetDevice(IntPtr channel, ref IntPtr device);
+
+    /**
+     * @brief      Set device internal buffer target when calling BM_Read and BM_Write to transfer messages.
+     *             For example, you might want to use this API to switch to the device's internal REPLAYQ buffer for hardware replay purpose.
+     * @param[in]  device  Handle to the device to operate on, retrieved by BM_GetDevice().
+     * @param[in]  type    Buffer direction, see BM_BufferTypeDef for details.
+     * @param[in]  id      Buffer identifier, see BM_BufferId for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetBuffer(IntPtr device, BM_BufferTypeDef type, BM_BufferId id);
+
+    /**
+     * @brief      Set PTP timestamp synchronization mode.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  mode    Expected PTP timestamp synchronization mode, see BM_PtpModeTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetPtpMode(IntPtr handle, BM_PtpModeTypeDef mode);
+
+    /**
+     * @brief      Set PTP timestamp in nano-seconds of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  ns      Expected PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetPtpTime(IntPtr handle, ulong ptpTimestamp);
+
+    /**
+     * @brief      Get PTP timestamp in nano-seconds of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[out] ns      Current PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetPtpTime(IntPtr handle, ref ulong ptpTimestamp);
+
+    /**
+     * @brief      Get PTP timestamp in nano-seconds of the host machine, which is calling BMAPI.
+     * @return     Current PTP timestamp in nano-seconds, in local timezone, since 1970-1-1.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern ulong BM_GetHostPtpTime();
+
+    /**
+     * @brief     A platform/OS independent implementation to synchronize PTP timestamp with the host machine for single/multiple channels.
+     * @param[in] handles     An array of channel handles.
+     * @param[in] nhandles    Number of valid channel handles.
+     * @return    Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SyncPtpTimes(IntPtr[] channelhandles, int nHandles);
+
+    /**
+    * @brief      Extract PTP timestamp from data (i.e. CAN message), this is a helper function to ease application programming.
+    * @param[in]  handle     Handle to the channel to operate on. Could be NULL if the device supports hardware PTP.
+    *                        Otherwise you would need this handle to align device local timestamp with host machine's UTC time.
+    * @param[in]  data       The message data from which to extract an PTP timestamp.
+    * @param[out] timestamp  The extracted PTP timestamp.
+    */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetDataPtpTimestamp(IntPtr handle, ref BM_DataTypeDef data, ref ulong ptpTimestamp);
+
+    /**
+     * @brief      Get current LIN status of the given channel.
+     * @param[in]  handle      Handle to the channel to operate on.
+     * @param[out] statusinfo  Detailed information of current LIN status, see BM_LinStatusInfoTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetLinStatus(IntPtr handle, ref BM_LinStatusInfoTypeDef statusinfo);
+
+    /**
+     * @brief      Get TX tasks option of the given channel.
+     * @param[in]  handle    Handle to the channel to operate on.
+     * @param[out] txtasks   An array of TX task information, see BM_TxTaskTypeDef for details.
+     * @param[in]  ntxtasks  Number of valid TX tasks in the txtasks array.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetTxTasks(IntPtr handle, IntPtr txtasks, int ntxtasks);
+
+    /**
+     * @brief      Get Message Routes option of the given channel.
+     * @param[in]  handle    Handle to the channel to operate on.
+     * @param[out] msgroutes An array of Message Routes information, see BM_MessageRouteTypeDef for details.
+     * @param[in]  nmsgroute Number of valid Message Routes in the routes array.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetMsgRoutes(IntPtr handle, IntPtr msgroutes, int nmsgroute);
+
+    /**
+     * @brief      Set channel mode option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  mode    Channel mode, see BM_CanModeTypeDef, BM_LinModeTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetMode(IntPtr handle, uint mode);
+
+    /**
+     * @brief      Get CAN mode option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[out] mode    Current CAN mode, see BM_CanModeTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetCanMode(IntPtr handle, ref BM_CanModeTypeDef mode);
+
+    /**
+     * @brief      Set sleep option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  status  Expected sleep status, see BM_SleepStatusTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetSleepStatus(IntPtr handle, BM_SleepStatusTypeDef status);
+
+    /**
+     * @brief      Get sleep option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  status  Current sleep status, see BM_SleepStatusTypeDef for details.
+     *                   Note: bmapi.h declares this parameter by value, the binding mirrors that ABI.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetSleepStatus(IntPtr handle, BM_SleepStatusTypeDef status);
+
+    /**
+     * @brief      Get terminal resistor option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[out] tres    Current terminal resistor, see BM_TerminalResistorTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetTerminalRegister(IntPtr handle, ref BM_TerminalResistorTypeDef tres);
+
+    /**
+     * @brief      Get LIN voltage option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[out] voltage Current LIN voltage, see BM_LinVoltageTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetLinVoltage(IntPtr handle, ref BM_LinVoltageTypeDef voltage);
+
+    /**
+     * @brief      Set LIN protocol option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  protocol Expected LIN protocol, see BM_LinProtocolConfigTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetLinProtocol(IntPtr handle, ref BM_LinProtocolConfigTypeDef protocol);
+
+    /**
+     * @brief      Get LIN protocol option of the given channel.
+     * @param[in]  handle   Handle to the channel to operate on.
+     * @param[out] protocol Current LIN protocol, see BM_LinProtocolConfigTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetLinProtocol(IntPtr handle, ref BM_LinProtocolConfigTypeDef protocol);
+
+    /**
+     * @brief      Set bitrate option of the given LIN channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  bitrate Expected bitrate, e.g. Set bitrate=19200 if 19200bps is expected.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetLinBitrate(IntPtr handle, ushort bitrate);
+
+    /**
+     * @brief      Set bitrate option of the given Ethernet channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  bitrate Expected speed, e.g. Set bitrate=1000 if 1000Mbps(1Gbps) is expected.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetEthSpeed(IntPtr handle, ushort bitrate);
+
+    /**
+     * @brief      Get bitrate option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[out] bitrate Current bitrate, see BM_BitrateTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetBitrate(IntPtr handle, ref BM_BitrateTypeDef bitrate);
+
+    /**
+     * @brief      Set Message Routes option of the given channel.
+     * @param[in]  handle    Handle to the channel to operate on.
+     * @param[in]  msgroutes An array of Message Routes information, see BM_MessageRouteTypeDef for details.
+     * @param[in]  nmsgroute Number of valid Message Routes in the routes array.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetMsgRoutes(IntPtr handle, IntPtr msgroutes, int nmsgroute);
+
+    /**
+     * @brief      Get RX filters option of the given channel.
+     * @param[in]  handle      Handle to the channel to operate on.
+     * @param[out] rxfilters   An array of RX filter information, see BM_RxFilterTypeDef for details.
+     * @param[in]  nrxfilters  Number of valid RX filters in the rxfilters array.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetRxFilters(IntPtr handle, IntPtr rxfilters, int nrxfilters);
+
+    /**
+     * @brief      Convert from 32-bit hardware timestamp to 64-bit UTC timestamp.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  timestamp32  Hardware 32-bit timestamp.
+     * @param[out] timestamp64  Converted 64-bit timestamp in micro-second, since 1970-1-1.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_MapTimestamp(IntPtr handle, uint timestamp32, ref ulong timestamp64);
+
+    /**
+     * @brief      Read LIN message out of the given channel.
+     * @param[in]  handle     Handle to the channel to read from.
+     * @param[out] msg        A caller-allocated buffer to hold the LIN message output, see BM_LinMessageTypeDef for details.
+     * @param[out] channel    The source channel ID from which the message is received, starting from zero.
+     * @param[out] timestamp  The device local high precision timestamp in microseconds, when the message is physically received on the LIN bus.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     * @note       Note this function is a simple wrapper of BM_Read(), see BM_Read() for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_ReadLinMessage(IntPtr handle, ref BM_LinMessageTypeDef msg, ref uint channel, ref uint timestamp);
+
+    /**
+     * @brief      Set background thread priority for performance-tuning purpose.
+     * @param[in]  priority  A integer, which is, 0-15 on Windows, and 0-100 on Unix.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void BM_SetThreadPriority(uint priority);
+
+    /**
+     * @brief      Get current CAN status of the given channel.
+     * @param[in]  handle      Handle to the channel to operate on.
+     * @param[out] statusinfo  Detailed information of current CAN status, see BM_CanStatusInfoTypedef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_GetCanStatus(IntPtr handle, ref BM_CanStatusInfoTypedef statusinfo);
+
+    /**
+     * @brief      Set LIN mode option of the given channel.
+     * @param[in]  handle  Handle to the channel to operate on.
+     * @param[in]  mode    Expected LIN mode, see BM_LinModeTypeDef for details.
+     * @return     Operation status, see BM_StatusTypeDef for details.
+     */
+    [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
+    public static extern BM_StatusTypeDef BM_SetLinMode(IntPtr handle, BM_LinModeTypeDef mode);
+
 }

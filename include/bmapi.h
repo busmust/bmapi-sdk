@@ -2,7 +2,7 @@
  * @file        bmapi.h
  * @brief       Busmust device communication API.
  * @author      busmust
- * @version     1.14.2.43
+ * @version     1.15.0.46
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -23,7 +23,7 @@ extern "C" {
  * @brief API version, format: major.minor.revision.build
  * @note  This macro might be checked by the application so that it could adapt to different versions of BMAPI.
  */
-#define BM_API_VERSION         0x010E022B
+#define BM_API_VERSION         0x010F002E
 
  /**
 * @def   BMAPI_REMOTE_API_AVAILABLE
@@ -729,8 +729,24 @@ BMAPI BM_StatusTypeDef BM_GetBitrate(BM_ChannelHandle handle, BM_BitrateTypeDef*
  * @param[in]  txtasks   An array of TX task information, see BM_TxTaskTypeDef for details.
  * @param[in]  ntxtasks  Number of valid TX tasks in the txtasks array.
  * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       Firmware gen3 >=3.2.0 or gen2.5 >=2.6.1 commits this prefix atomically;
+ *             untouched trailing slots remain. BM_TXTASK_FLAGS_KEEP_CONTEXT retains
+ *             execution progress. Already queued or in-flight whole frames may finish.
  */
 BMAPI BM_StatusTypeDef BM_SetTxTasks(BM_ChannelHandle handle, BM_TxTaskTypeDef* txtasks, int ntxtasks);
+
+/**
+ * @brief      Set one hardware TX task slot of the given channel.
+ * @param[in]  handle  Handle to the channel to operate on.
+ * @param[in]  txtask  TX task information, see BM_TxTaskTypeDef for details.
+ * @param[in]  index   Hardware task slot index, from 0 to 63 inclusive.
+ * @return     Operation status, see BM_StatusTypeDef for details.
+ * @note       BM_TXTASK_FLAGS_KEEP_CONTEXT requires firmware gen3 >=3.2.0 or
+ *             gen2.5 >=2.6.1 and retains execution progress while updating the task.
+ *             Older firmware uses its legacy write/reset behavior and restarts timing.
+ *             Already queued or in-flight whole frames may finish.
+ */
+BMAPI BM_StatusTypeDef BM_SetTxTask(BM_ChannelHandle handle, const BM_TxTaskTypeDef* txtask, int index);
 
 /**
  * @brief      Set Message Routes option of the given channel.

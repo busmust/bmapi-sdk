@@ -55,7 +55,7 @@ Every application follows this basic flow:
 | Directory | Description |
 |-----------|-------------|
 | `doc/` | Documentation and reference materials |
-| `include/` | Header files: `bmapi.h`, `bm_usb_def.h`, `osal.h` |
+| `include/` | Core API headers plus optional simulation schema and native E2E plugin ABI definitions |
 | `example/` | Examples in multiple languages |
 
 ## Examples
@@ -95,6 +95,7 @@ Every application follows this basic flow:
 
 - **`BM_Read` is polling-based**: After each `BM_WaitForNotification`, you must drain the queue by calling `BM_Read` in a loop (until it returns `BM_ERROR_QRCVEMPTY`), since one notification may correspond to multiple messages.
 - **`BM_Write` timeout**: timeout=0 means async mode (no TEF consumed); timeout≠0 means blocking mode (waits for ACK).
+- **Live periodic-task updates**: `BM_SetTxTask` with `BM_TXTASK_FLAGS_KEEP_CONTEXT` updates one running hardware TX task without restarting its period or execution context on compatible firmware (Gen3 3.2.0+ or Gen2.5 2.6.1+).
 - **Device exclusivity**: Each physical device can only be opened by one process at a time.
 - **Thread safety**: `WriteXXX`/`ReadXXX` functions are thread-safe; `OpenEx` and `SetXXX` functions are **not**.
 - **BUSOFF recovery**: See the `recoverFromError()` function in `bmapi_transmit_only`.
