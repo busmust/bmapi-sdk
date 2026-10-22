@@ -2,7 +2,7 @@
  * @file        bm_usb_def.h
  * @brief       Busmust USB device data type definitions.
  * @author      busmust
- * @version     1.15.0.46
+ * @version     1.16.0.48
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.

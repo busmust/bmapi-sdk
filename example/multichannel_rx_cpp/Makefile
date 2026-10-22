@@ -16,5 +16,5 @@ clean:
 	rm -f multichannel_rx_cpp.o multichannel_rx_cpp
 
 example:
-	$(CC) $(CFLAGS) multichannel_rx_cpp.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o multichannel_rx_cpp
+	$(CC) $(CFLAGS) multichannel_rx_cpp.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o multichannel_rx_cpp
 

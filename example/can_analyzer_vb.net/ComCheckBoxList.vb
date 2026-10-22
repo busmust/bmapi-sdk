@@ -76,13 +76,21 @@ Public Class ComCheckBoxList
         End If
 
         Dim popupWidth As Integer = Math.Max(Width, 200)
-        Dim popupHeight As Integer = Math.Min(260, (itemTexts.Count + 1) * 18 + 4)
+        Dim popupHeight As Integer = 260
         Dim list As New CheckedListBox() With {
+            .Font = Font,
             .CheckOnClick = True,
             .IntegralHeight = False,
             .BorderStyle = BorderStyle.FixedSingle,
             .Size = New Size(popupWidth, popupHeight)
         }
+
+        ' Keep the visible client area an integral number of actual rows.
+        list.CreateControl()
+        Dim borderHeight As Integer = list.Height - list.ClientSize.Height
+        Dim visibleRows As Integer = Math.Min(itemTexts.Count + 1, Math.Max(1, (popupHeight - borderHeight) \ list.ItemHeight))
+        popupHeight = visibleRows * list.ItemHeight + borderHeight
+        list.Height = popupHeight
 
         list.Items.Add(SelectAllLabel, AllItemsChecked())
         For i As Integer = 0 To itemTexts.Count - 1

@@ -2,7 +2,7 @@
  * @file        bmapi.h
  * @brief       Busmust device communication API.
  * @author      busmust
- * @version     1.15.0.46
+ * @version     1.16.0.48
  * @copyright   Copyright 2020 by Busmust Tech Co.,Ltd <br>
  *              All rights reserved. Property of Busmust Tech Co.,Ltd.<br>
  *              Restricted rights to use, duplicate or disclose of this code are granted through contract.
@@ -23,7 +23,7 @@ extern "C" {
  * @brief API version, format: major.minor.revision.build
  * @note  This macro might be checked by the application so that it could adapt to different versions of BMAPI.
  */
-#define BM_API_VERSION         0x010F002E
+#define BM_API_VERSION         0x01100030
 
  /**
 * @def   BMAPI_REMOTE_API_AVAILABLE
@@ -272,6 +272,25 @@ BMAPI BM_StatusTypeDef BM_Deactivate(BM_ChannelHandle handle);
  * @note      This function is available since BMAPI1.3, hardware status will not be changed when clearing buffer.
  */
 BMAPI BM_StatusTypeDef BM_ClearBuffer(BM_ChannelHandle handle);
+
+/**
+ * @brief Clear one direction on a local buffered channel.
+ * @param direction BM_RXQ_BUFFER or BM_TXQ_BUFFER; other values are invalid.
+ * @note RX clearing uses the current device timestamp as an inclusive cutoff,
+ *       retains newer RX and internal TX completion records, and filters late
+ *       historical RX for two seconds using a host monotonic clock. RX clearing
+ *       does not reset the device's shared RX queue and works with old firmware.
+ *       A failed timestamp query leaves RX unchanged. TX clearing cancels queued
+ *       writes without changing RX; firmware older than 2.4.12 returns
+ *       BM_ERROR_ILLOPERATION for TX only. Serialize Open/configuration/close
+ *       and Clear in one control thread. Background Read (RX and BM_ACK_DATA)
+ *       and ordinary asynchronous Write (timeout 0) may overlap Clear.
+ *       TX Clear rejects active synchronous event consumers; shared/direct
+ *       buffers are unsupported. These preflight rejections leave the channel
+ *       usable. If an admitted TX clear fails, reopen before writing again. BM_ClearBuffer still clears RX+TX
+ *       and shares the same RX cutoff implementation.
+ */
+BMAPI BM_StatusTypeDef BM_ClearBufferEx(BM_ChannelHandle handle, BM_BufferId direction);
 
 /**
  * @brief      Recover from CAN BUSOFF state.

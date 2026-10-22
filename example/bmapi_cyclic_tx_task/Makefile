@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_cyclic_tx_task.o bmapi_cyclic_tx_task
 
 example:
-	$(CC) $(CFLAGS) bmapi_cyclic_tx_task.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_cyclic_tx_task 
+	$(CC) $(CFLAGS) bmapi_cyclic_tx_task.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_cyclic_tx_task
 

@@ -80,7 +80,9 @@
     <Folder Include="Properties\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <PropertyGroup>
-    <PostBuildEvent>copy "$(ProjectDir)BMAPI.dll" "$(ProjectDir)$(OutDir)"</PostBuildEvent>
-  </PropertyGroup>
+  <ItemGroup>
+    <None Include="BMAPI.dll">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

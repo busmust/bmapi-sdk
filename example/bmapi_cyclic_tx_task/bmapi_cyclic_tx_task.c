@@ -280,7 +280,7 @@ static int transmit(BM_ChannelHandle channel, BM_NotificationHandle notification
 		printf("Failed to configure tx task, error=%d.\n", error);
 	}
 
-	while (TRUE)
+	while (1)
 	{
 		uint32_t cycleCount = 0;
 		while (cycleCount < cycle)
@@ -330,7 +330,7 @@ static int transmit(BM_ChannelHandle channel, BM_NotificationHandle notification
 			break;
 		}
 		lastStatus = error;
-		Sleep(1);
+		usleep(1000);
 	}
 
 	time_t t2 = time(NULL);
@@ -381,20 +381,20 @@ void app_processTxTask(BM_ChannelHandle handle)
 		for (index = 0U; index < APP_N_TASK; index++)
 		{
 			const BM_TxTaskTypeDef* ptask = &m_tasks[channel][index];
-			BOOL transmitNow = FALSE;
+			int transmitNow = 0;
 			if (ptask->type == BM_TXTASK_INVALID)
 			{
-				transmitNow = FALSE;
+				transmitNow = 0;
 			}
 			else if (ptask->nrounds != 0xFFFFU && txTaskRounds[channel][index] >= ptask->nrounds)
 			{
 				/* Task already finished, re-configure all tasks to re-start this task. */
-				transmitNow = FALSE;
+				transmitNow = 0;
 			}
 			else if (txTaskCounters[channel][index])
 			{
 				/* Current round ongoing, maybe there was no enough room in CANTXQ on previous tick, retry immediately in this tick */
-				transmitNow = FALSE;
+				transmitNow = 0;
 			}
 			else if (txTaskTimers[channel][index])
 			{
@@ -405,7 +405,7 @@ void app_processTxTask(BM_ChannelHandle handle)
 			else
 			{
 				/* Count timeout, time for next round! */
-				transmitNow = TRUE;
+				transmitNow = 1;
 			}
 			if (transmitNow)
 			{

@@ -15,7 +15,7 @@
 #include "bmapi.h"
 #include "osal.h"
 #define BMAPI_MAX_CHANNEL_COUNT         32
-/* Configuration save mask bits (from bm_usb_private_def.h) */
+/* Configuration save mask bits used by this example. */
 #define BM_CAN_MODE_FLAG                0x0001U    /* CAN mode configuration */
 #define BM_CAN_BITRATE_FLAG             0x0002U    /* Bitrate configuration */
 #define BM_CAN_TERMINAL_RESISTOR_FLAG   0x0004U    /* Terminal resistor configuration */
@@ -178,11 +178,11 @@ int main(int argc, char* argv[])
     replay.version = 1;
     if (ENABLE_OFFLINE_REPLAY)
     {
-        strcpy_s(replay.path.format, sizeof(replay.path.format), "0000");
+        snprintf(replay.path.format, sizeof(replay.path.format), "%s", "0000");
     }
     else
     {
-        strcpy_s(replay.path.format, sizeof(replay.path.format), "<RAMBUF>");
+        snprintf(replay.path.format, sizeof(replay.path.format), "%s", "<RAMBUF>");
     }
     /* Step 4: Initialize replay mode to disabled */
     replay.mode = BM_STORAGE_DISABLED;

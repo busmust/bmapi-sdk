@@ -74,12 +74,14 @@ typedef struct
 {
     BM_ChannelHandle channel;
     BM_NotificationHandle notification;
+#ifdef _MSC_VER
     HANDLE hEvent;
+#endif
     uint32_t nroundmessages;
     uint32_t nrounds;
     uint32_t cycle;
     uint32_t ninc;
-    BOOL bRequestExit;
+    int bRequestExit;
 } ThreadArgs;
 #if defined(BMAPI_PARALLEL_READ_WRITE)
 DWORD transmit_thread(LPVOID lpArg)

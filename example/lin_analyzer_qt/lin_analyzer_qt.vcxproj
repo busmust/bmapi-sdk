@@ -121,7 +121,7 @@
     </ResourceCompile>
     <QtMoc>
       <CompilerFlavor>msvc</CompilerFlavor>
-      <Include>F:/Projects/busmaster/busmaster/Sources/BUSMASTER/BMAPI/BMAPI SDK/example/lin_analyzer_qt/$(Configuration)/moc_predefs.h</Include>
+      <Include>$(ProjectDir)$(Configuration)\moc_predefs.h</Include>
       <ExecutionDescription>Moc'ing %(Identity)...</ExecutionDescription>
       <DynamicSource>output</DynamicSource>
       <QtMocDir>$(Configuration)</QtMocDir>
@@ -181,7 +181,7 @@
     </ResourceCompile>
     <QtMoc>
       <CompilerFlavor>msvc</CompilerFlavor>
-      <Include>F:/Projects/busmaster/busmaster/Sources/BUSMASTER/BMAPI/BMAPI SDK/example/lin_analyzer_qt/$(Configuration)/moc_predefs.h</Include>
+      <Include>$(ProjectDir)$(Configuration)\moc_predefs.h</Include>
       <ExecutionDescription>Moc'ing %(Identity)...</ExecutionDescription>
       <DynamicSource>output</DynamicSource>
       <QtMocDir>$(Configuration)</QtMocDir>

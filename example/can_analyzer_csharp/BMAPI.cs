@@ -2069,7 +2069,7 @@ class BMAPI
     //BMAPI BM_StatusTypeDef BM_GetPtpTime(BM_ChannelHandle handle, uint64_t* ns);
     [DllImport("BMAPI.DLL", CallingConvention = CallingConvention.Cdecl)]
     public static extern BM_StatusTypeDef BM_GetPtpTime(IntPtr handle, ref ulong ptpTimestamp);
-    /* ==== APIs synchronized with BMAPI 1.14.2.45 ==== */
+    /* ==== APIs synchronized with bmapi.h 1.14.2.45 (CAN-332) ==== */
 
     public const uint BM_REMOTE_SESSION_ABI_VERSION = 1;          /**< Remote control-session public ABI version, see bm_usb_def.h. */
     public const uint BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS = 10000; /**< Default remote control-lock lease in milliseconds. */

@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_remote_connection.o bmapi_remote_connection
 
 example:
-	$(CC) $(CFLAGS) bmapi_remote_connection.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_remote_connection
+	$(CC) $(CFLAGS) bmapi_remote_connection.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_remote_connection
 

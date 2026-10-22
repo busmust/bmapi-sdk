@@ -829,7 +829,8 @@ Partial Public Class MainForm
         Dim str As New StringBuilder(32)
 
 
-        item.Text = Convert.ToString(received.Timestamp * 0.000001F)
+        ' The legacy binding stores uint32 timestamp bits in a signed Integer.
+        item.Text = Convert.ToString((CLng(received.Timestamp) And &HFFFFFFFFL) * 0.000001)
         If received.UtcTimestamp > 0 Then
             TimevalToFormattedString(received.UtcTimestamp, str, 32)
         Else

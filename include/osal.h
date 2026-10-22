@@ -20,6 +20,10 @@
 #if OSAL_ENABLE_SOCKET
 #ifdef _MSC_VER
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
+#ifdef __cplusplus
+// Windows 7.1A objbase.h uses IUnknown before its later definition.
+struct IUnknown;
+#endif
 #include <winsock2.h>
 #include <WS2tcpip.h>
 #pragma comment(lib,"ws2_32.lib")
@@ -82,10 +86,8 @@ typedef void* ThreadExitCode;
 #define __can_printf printf
 #define GetTickCount() __bm_get_tick()
 #define GetLastError() errno
-//#include <libusb-1.0/libusb.h>
 #elif defined(_MSC_VER)
 #pragma warning(disable:4200)
-//#include "libusb/libusb.h"
 #define NOTIFICATION_HANDLE HANDLE
 #define INVALID_NOTIFICATION_HANDLE NULL
 #define THREAD_HANDLE HANDLE

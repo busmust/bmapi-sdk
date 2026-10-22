@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_receive_only.o bmapi_receive_only
 
 example:
-	$(CC) $(CFLAGS) bmapi_receive_only.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_receive_only
+	$(CC) $(CFLAGS) bmapi_receive_only.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_receive_only
 

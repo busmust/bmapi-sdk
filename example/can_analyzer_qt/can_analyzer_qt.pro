@@ -2,6 +2,8 @@ QT       += core gui
 QT       += network
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 CONFIG += c++11
+# NMake batch inference fails with the space in the SDK source directory.
+win32-msvc*: CONFIG += no_batch
 
 # The following define makes your compiler emit warnings if you use
 # any Qt feature that has been marked deprecated (the exact warnings
@@ -28,10 +30,10 @@ HEADERS += \
 FORMS += \
     widget.ui
 
-INCLUDEPATH += ..\..\include\
+INCLUDEPATH += $$quote($$PWD/../../include)
 
-win32: LIBS += -L..\..\lib\win32 -lbmapi
-unix: LIBS += -L..\..\bin\unix32 -lbmapi
+win32: LIBS += -L$$quote($$PWD/../../lib/win32) -lbmapi
+unix: LIBS += -L$$quote($$PWD/../../bin/unix32) -lbmapi
 
 # win32: QMAKE_POST_LINK += copy ..\..\bin\win32\BMAPI.dll "$$replace(OUT_PWD, /, \\)\debug"
 

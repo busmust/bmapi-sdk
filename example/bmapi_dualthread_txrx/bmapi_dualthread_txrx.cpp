@@ -66,7 +66,7 @@ typedef struct
     BM_ChannelHandle channel;           
     BM_NotificationHandle notification; 
     THREAD_HANDLE thread_handle;        
-    volatile BOOL bRequestExit;         
+    volatile int bRequestExit;
 } ThreadParams;
 
 

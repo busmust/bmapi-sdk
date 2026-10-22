@@ -33,6 +33,8 @@ BMAPI SDK 包含一系列运行时库和例程，支持应用程序通过 Busmus
 2. `doc/BMAPI.chm` — CHM 格式 API 参考手册，函数调用时快速查阅
 3. `doc/Application Programming Sequence.png` — 标准应用编程序列流程图
 
+使用 AI 辅助开发时，先阅读 [`AGENTS.md`](AGENTS.md)，再阅读软件开发指南和最接近的现有例程，之后再修改代码。
+
 ### 标准编程序列
 
 每个应用程序都遵循以下基本流程：
@@ -67,6 +69,8 @@ BMAPI SDK 包含一系列运行时库和例程，支持应用程序通过 Busmus
 | `bmapi_transmit_only/` | 最基础的 CAN FD **发送**例程 |
 | `bmapi_receive_only/` | 最基础的 CAN FD **接收**例程 |
 | `bmapi_lin_txrx/` | LIN 收发例程（支持主机/从机） |
+| [`bmapi_asc_record/`](example/bmapi_asc_record/README.md) | 基础 CAN/CAN FD ASC 录制 |
+| [`bmapi_asc_replay/`](example/bmapi_asc_replay/README.md) | 基础 CAN/CAN FD ASC 回放 |
 
 ### 进阶 C/C++ 例程
 
@@ -149,6 +153,10 @@ BMAPI 会自动发送心跳。申请失败时返回 `BM_ERROR_NETINUSE`，不会
 ## 下载
 
 各平台预编译二进制文件（DLL/SO/LIB）请前往 [Releases](https://github.com/busmust/bmapi-sdk/releases) 页面下载。
+
+编译例程时请使用解压后的 Release SDK，其中包含各平台的 `bin/`、`lib/` 和托管例程使用的本地 DLL。请保持 SDK 目录结构完整；仅克隆源码仓库不会获得这些二进制文件。
+
+BMAPI 已静态链接 libusb。应用程序只需包含 BMAPI 公共头文件并链接 BMAPI，无需额外包含 libusb 头文件、配置搜索路径或添加 `-lusb`、`-lusb-1.0`。旧项目升级时，请移除这些遗留配置。
 
 ## 技术支持
 

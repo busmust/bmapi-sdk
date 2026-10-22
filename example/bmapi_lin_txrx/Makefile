@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_lin_txrx.o bmapi_lin_txrx
 
 example:
-	$(CC) $(CFLAGS) bmapi_lin_txrx.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_lin_txrx 
+	$(CC) $(CFLAGS) bmapi_lin_txrx.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_lin_txrx
 

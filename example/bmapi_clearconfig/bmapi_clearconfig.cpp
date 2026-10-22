@@ -6,7 +6,6 @@
 #include <unordered_set>
 #include <string>
 #include "bmapi.h"
-#include <conio.h>
 #ifdef __GNUC__
 #include <unistd.h>
 #elif defined(_MSC_VER)

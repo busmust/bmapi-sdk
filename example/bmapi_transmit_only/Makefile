@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_transmit_only.o bmapi_transmit_only
 
 example:
-	$(CC) $(CFLAGS) bmapi_transmit_only.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_transmit_only 
+	$(CC) $(CFLAGS) bmapi_transmit_only.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_transmit_only
 

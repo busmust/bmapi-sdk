@@ -4,6 +4,10 @@ BMAPI (Busmust Device Communication Application Programming Interface) SDK by Bu
 
 The BMAPI SDK provides a collection of runtime libraries and examples for real-time connection of applications to CAN/LIN buses via Busmust USB devices.
 
+Use the extracted release package when building examples: it supplies the platform `bin/` and `lib/` directories and the local DLL inputs used by managed examples. Keep the SDK directory layout intact; a source-only Git clone does not contain these binaries.
+
+BMAPI already statically links libusb. Applications include the BMAPI public headers and link only BMAPI; do not add libusb headers, search paths, `-lusb`, or `-lusb-1.0`. Remove these legacy settings when upgrading an older project.
+
 ## Supported Platforms
 
 - Windows XP/7/8/10/11 x86 (32-bit/64-bit)
@@ -32,6 +36,8 @@ The BMAPI SDK provides a collection of runtime libraries and examples for real-t
 1. `doc/BMAPI软件开发指南.pdf` — Complete API usage guide (read this first)
 2. `doc/BMAPI.chm` — API reference manual for quick lookup during development
 3. `doc/Application Programming Sequence.png` — Standard programming sequence diagram
+
+For AI-assisted development, start with [`AGENTS.md`](AGENTS.md), then read the guide and the closest existing example before changing code.
 
 ### Standard Programming Sequence
 
@@ -67,6 +73,8 @@ Every application follows this basic flow:
 | `bmapi_transmit_only/` | Minimal CAN FD **transmit** example |
 | `bmapi_receive_only/` | Minimal CAN FD **receive** example |
 | `bmapi_lin_txrx/` | LIN transmit/receive (master and slave) |
+| [`bmapi_asc_record/`](example/bmapi_asc_record/README.md) | Basic CAN/CAN FD ASC recording |
+| [`bmapi_asc_replay/`](example/bmapi_asc_replay/README.md) | Basic CAN/CAN FD ASC replay |
 
 ### Advanced C/C++ Examples
 

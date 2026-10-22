@@ -504,6 +504,7 @@ Public Structure BM_LinMessageTypeDef
     <MarshalAs(UnmanagedType.ByValArray, SizeConst:=3)>
     Public padding() As Byte                        '/**< LIN message control fields, invalid If this Is Not a LIN message. */
     Public ctrl As BM_LinMessageCtrlTypeDef                     '/**< LIN message control fields, invalid If this Is Not a LIN message. */   
+    <MarshalAs(UnmanagedType.ByValArray, SizeConst:=8)>
     Public payload() As Byte                        '/**< LIN message payload */
 
     Public Sub New(ctrl As BM_LinMessageCtrlTypeDef,
@@ -2077,7 +2078,7 @@ Class BMAPI
     <DllImport("BMAPI.DLL", CallingConvention:=CallingConvention.Cdecl)>
     Public Shared Function BM_SetLinVoltage(ByVal handle As IntPtr, ByVal voltage As BM_LinVoltageTypeDef) As BM_StatusTypeDef
     End Function
-    ' ==== APIs synchronized with BMAPI 1.14.2.45 ====
+    ' ==== APIs synchronized with bmapi.h 1.14.2.45 (CAN-332) ====
 
     Public Const BM_REMOTE_SESSION_ABI_VERSION As UInteger = 1               '** Remote control-session public ABI version, see bm_usb_def.h. *'
     Public Const BM_REMOTE_SESSION_DEFAULT_TIMEOUT_MS As UInteger = 10000    '** Default remote control-lock lease in milliseconds. *'

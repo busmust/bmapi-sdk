@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.16.0.48 [2026-10-22]
+
+1. Added a customer-facing `AGENTS.md` development entry that guides AI-assisted development through the BMAPI software development guide, the closest existing example, public headers, and the documented notification, buffer, and threading model.
+2. Added basic CAN/CAN FD ASC recording and replay examples with Windows and Linux projects, build/run support, and platform-specific example executables and matching runtime libraries, demonstrating receive-queue draining, confirmed transmission counts, bounded stopping, and explicit failure reporting for incomplete operations.
+3. Added `BM_ClearBufferEx` for directional clearing on local buffered channels and improved `BM_ClearBuffer` receive clearing to preserve other channels, newer received frames, and transmit-completion handling; TX-only clearing requires firmware 2.4.12 or later and rejects active synchronous completion consumers.
+4. Fixed `BM_ReadMultiple` and `BM_ReadMultipleCanMessage` to return the actual number of messages read, including zero, on timeout, empty-queue completion, and errors encountered during a batch read.
+5. Fixed `BM_GetDataPtpTimestamp` extraction for valid current and legacy Gen3 CAN/CAN FD/LIN records without the tail-present flag, retaining strict layout validation and allowing extraction without a channel handle when the record contains a complete hardware timestamp.
+6. Fixed `BM_OpenEx` failing to open Gen3 PCIe LIN channels by restricting CAN ISO-TP initialization to channels with CAN or CAN FD capability. Made PCIe device identification, channel naming, and port mapping consistent across Windows and Linux, and improved identification stability when enumerating already-open devices again.
+7. Fixed fixed-size LIN payload marshalling in the VB.NET bindings to match the public BMAPI structure layout.
+8. Fixed clipped channel-selection rows in the C#/VB.NET CAN analyzer examples and incorrect negative timestamp display in the VB.NET example.
+9. Made managed CAN/LIN examples consistently copy their local BMAPI DLL and fail the build when that input is missing, and fixed the LIN C#/VB.NET examples to return failure exit codes correctly.
+10. Fixed Linux build portability in several C/C++ examples and corrected Qt CAN/LIN example include/library paths for SDK directories containing spaces and shadow builds.
+11. Removed unnecessary application-side libusb linkage from the examples and clarified in the SDK entry documents and development guide that BMAPI already statically links libusb, so older projects should remove redundant libusb headers, include paths, and linker options when upgrading.
+
+## 1.15.1.48 [2026-10-14]
+
+1. Fixed `BM_GetDataPtpTimestamp` failing to return the hardware PTP timestamp for valid current and legacy Gen3 CAN/CAN FD/LIN records whose tail-present flag is not set. The API retains strict record-layout validation and can return a complete hardware timestamp without a channel handle when the record contains one.
+2. Fixed `BM_OpenEx` failing to open Gen3 PCIe LIN channels because CAN ISO-TP initialization was sent to LIN-only channels. ISO-TP setup is now applied only to channels with CAN or CAN FD capability, while older device compatibility paths remain unchanged.
+
 ## 1.15.0.46 [2026-09-24]
 
 1. Added the indexed `BM_SetTxTask` API and the `BM_TXTASK_FLAGS_KEEP_CONTEXT` update flag. On Gen3 firmware 3.2.0 or later and Gen2.5 firmware 2.6.1 or later, batch updates are committed transactionally and running tasks can retain their period phase, remaining rounds, and pattern context; older firmware continues to use the legacy compatibility path.

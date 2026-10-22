@@ -467,6 +467,7 @@ Public Structure BM_LinMessageTypeDef
     <MarshalAs(UnmanagedType.ByValArray, SizeConst:=3)>
     Public padding() As Byte                        '/**< LIN message control fields, invalid If this Is Not a LIN message. */
     Public ctrl As BM_LinMessageCtrlTypeDef                     '/**< LIN message control fields, invalid If this Is Not a LIN message. */   
+    <MarshalAs(UnmanagedType.ByValArray, SizeConst:=8)>
     Public payload() As Byte                        '/**< LIN message payload */
 
     Public Sub New(ctrl As BM_LinMessageCtrlTypeDef,

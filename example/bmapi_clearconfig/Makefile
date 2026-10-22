@@ -1,4 +1,4 @@
-CC = gcc
+CC = g++
 CFLAGS := -Wall -O3
 LBITS := $(shell getconf LONG_BIT)
 ifeq ($(LBITS),64)
@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_clearconfig.o bmapi_clearconfig
 
 example:
-	$(CC) $(CFLAGS) bmapi_clearconfig.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_clearconfig 
+	$(CC) $(CFLAGS) bmapi_clearconfig.cpp -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_clearconfig
 

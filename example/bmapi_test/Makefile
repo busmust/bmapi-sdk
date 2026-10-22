@@ -16,5 +16,5 @@ clean:
 	rm -f bmapi_test.o bmapi_test
 
 example:
-	$(CC) $(CFLAGS) bmapi_test.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -lusb-1.0 -o bmapi_test 
+	$(CC) $(CFLAGS) bmapi_test.c -I../../include -L$(INCLUDE) -L. -l$(LIB) -o bmapi_test
 

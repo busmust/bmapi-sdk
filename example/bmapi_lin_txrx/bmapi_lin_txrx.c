@@ -181,7 +181,7 @@ int main(int argc, char* argv[])
 		}
 
 		BM_ClearBuffer(channel);
-		Sleep(100);
+		usleep(100000);
 
 		/* Step4: TX (according to command line arguments) */
 		uint32_t nmessages = argc > 3 ? atoi(argv[3]) : TEST_MSG_COUNT;

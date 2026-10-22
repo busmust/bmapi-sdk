@@ -101,15 +101,23 @@ namespace can_analyzer_csharp
 
             int width = Math.Max(this.Width, 200);
             // +1 row for the "(Select All)" entry.
-            int height = Math.Min(260, (itemTexts.Count + 1) * 18 + 4);
+            int height = 260;
 
             CheckedListBox list = new CheckedListBox
             {
+                Font = this.Font,
                 CheckOnClick = true,
                 IntegralHeight = false,
                 BorderStyle = BorderStyle.FixedSingle,
                 Size = new Size(width, height),
             };
+
+            // Keep the visible client area an integral number of actual rows.
+            list.CreateControl();
+            int borderHeight = list.Height - list.ClientSize.Height;
+            int visibleRows = Math.Min(itemTexts.Count + 1, Math.Max(1, (height - borderHeight) / list.ItemHeight));
+            height = visibleRows * list.ItemHeight + borderHeight;
+            list.Height = height;
 
             // Row 0 is "(Select All)", checked iff every real item is checked.
             list.Items.Add(SelectAllLabel, AllItemsChecked());

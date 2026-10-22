@@ -401,6 +401,7 @@ Frame rate: {3:F3} fps
             /* Step6: Cleanup library resource */
             BMAPI.BM_UnInit();
             Console.WriteLine($"Exit {mode} app.");
+            Environment.ExitCode = exitcode;
         }
     }
 }

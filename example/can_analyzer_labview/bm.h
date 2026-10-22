@@ -899,7 +899,7 @@ BMAPI void BM_GetErrorText(BM_StatusTypeDef errorcode, char* buffer, int nbytes,
 BMAPI void BM_GetDataText(BM_DataTypeDef* data, char* buffer, int nbytes, uint16_t language);
 
 
-/* ==== Types and APIs synchronized with BMAPI 1.14.2.45 ==== */
+/* ==== Types and APIs synchronized with bmapi.h/bm_usb_def.h 1.14.2.45 (CAN-332) ==== */
 
 typedef enum
 {
